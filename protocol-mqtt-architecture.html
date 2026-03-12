@@ -1,0 +1,2895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protocol → MQTT Architecture Simulator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#030912;--surface:#08111f;--surface2:#0d1a2e;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.14);
+  --text:#ffffff;--text2:rgba(255,255,255,0.42);--text3:rgba(255,255,255,0.22);
+  --grid-line:rgba(0,180,255,0.025);
+  --modbus:#ff6b35;--bacnet:#f9c74f;--snmp:#4cc9f0;
+  --zigbee:#76c442;--canbus:#c77dff;--mqtt:#00e5ff;
+  --db:#ffd60a;--fe:#56cfe1;--rules:#ff9f1c;
+  --glow:rgba(0,229,255,0.35);
+  --card-bg:rgba(255,255,255,0.018);
+  --modal-bg:#060d1a;
+  --pkt-label-bg:rgba(3,9,18,0.96);
+  --hex-dump-color:rgba(255,255,255,0.35);
+}
+html.light{
+  --bg:#eef2f8;--surface:#ffffff;--surface2:#f0f4fb;
+  --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.18);
+  --text:#0d1a2e;--text2:rgba(13,26,46,0.55);--text3:rgba(13,26,46,0.3);
+  --grid-line:rgba(0,80,180,0.06);
+  --glow:rgba(0,120,200,0.3);
+  --card-bg:rgba(0,0,0,0.025);
+  --modal-bg:#ffffff;
+  --pkt-label-bg:rgba(240,244,251,0.97);
+  --hex-dump-color:rgba(13,26,46,0.45);
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);font-family:'Rajdhani',sans-serif;color:var(--text);min-height:100vh;overflow-x:hidden;transition:background .35s,color .35s}
+body::before{content:'';position:fixed;inset:0;
+  background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gradient(90deg,var(--grid-line) 1px,transparent 1px);
+  background-size:48px 48px;pointer-events:none;z-index:0;animation:gridDrift 40s linear infinite}
+@keyframes gridDrift{0%{background-position:0 0}100%{background-position:48px 48px}}
+
+.scene{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:18px 12px 50px}
+
+/* ─ HEADER ─ */
+.header-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:10px;flex-wrap:wrap}
+.title-block{flex:1;text-align:center}
+.title-block h1{font-family:'Orbitron',monospace;font-size:clamp(12px,1.8vw,22px);color:var(--mqtt);text-shadow:0 0 28px var(--glow);letter-spacing:3px}
+.title-block p{color:var(--text3);font-size:9px;letter-spacing:4px;text-transform:uppercase;margin-top:3px}
+
+/* ─ CONTROLS ─ */
+.controls{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.btn-pause{
+  font-family:'Orbitron',monospace;font-size:10px;letter-spacing:1px;
+  padding:7px 16px;border-radius:6px;cursor:pointer;
+  background:rgba(0,229,255,0.08);border:1.5px solid rgba(0,229,255,0.4);
+  color:var(--mqtt);transition:all .2s;white-space:nowrap;
+}
+.btn-pause:hover{background:rgba(0,229,255,0.18);box-shadow:0 0 14px rgba(0,229,255,0.3)}
+.btn-pause.paused{background:rgba(255,107,53,0.1);border-color:rgba(255,107,53,0.4);color:var(--modbus)}
+.speed-wrap{display:flex;align-items:center;gap:5px;font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,0.4)}
+.speed-wrap select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:9px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:background .3s,color .3s}
+.pkt-counter{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--mqtt);opacity:0.7;white-space:nowrap}
+
+/* ─ LEGEND ─ */
+.legend{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin:8px 0 14px}
+.legend-item{display:flex;align-items:center;gap:4px;font-size:9px;font-family:'Share Tech Mono',monospace;color:var(--text2)}
+.legend-dot{width:7px;height:7px;border-radius:50%}
+
+/* ─ ARCH WRAPPER ─ */
+.arch-wrap{position:relative;width:100%;overflow:visible}
+#arch-svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5}
+.arch{display:grid;grid-template-columns:175px minmax(160px,1fr) 128px minmax(160px,1fr) 175px;column-gap:0;row-gap:0;align-items:center;position:relative;z-index:2}
+/* The gap between columns IS the wire space — we control it via padding on col edges */
+.col{display:flex;flex-direction:column;gap:9px}
+.col-devices{padding-right:0}
+.col-bridges{padding-left:28px;padding-right:28px}
+.col-consumers{padding-left:28px;padding-right:28px}
+.col-outputs{padding-left:0}
+.col-center{display:flex;flex-direction:column;align-items:center}
+.col-label{font-family:'Share Tech Mono',monospace;font-size:7.5px;letter-spacing:3px;text-transform:uppercase;text-align:center;padding:2px 0 7px;color:var(--text3)}
+
+/* ─ DEVICE CARDS ─ */
+.device-card{background:var(--card-bg);border:1px solid var(--border);border-radius:7px;padding:5px 8px;display:flex;align-items:center;gap:6px;transition:all .2s;cursor:default;position:relative}
+.device-card:hover{transform:translateX(4px);border-color:var(--border2);background:rgba(128,128,128,0.06)}
+.device-icon{font-size:13px;flex-shrink:0}
+.device-name{font-family:'Share Tech Mono',monospace;font-size:8.5px;line-height:1.2}
+.device-val{font-size:7.5px;color:var(--text2);margin-top:1px}
+.device-val span{font-family:'Share Tech Mono',monospace;font-weight:bold;transition:color .3s}
+.device-status{width:5px;height:5px;border-radius:50%;position:absolute;top:5px;right:6px;animation:statusBlink 2s ease-in-out infinite}
+.device-status.online{background:#76c442;box-shadow:0 0 5px #76c442}
+.device-status.warn{background:#f9c74f;animation:warnBlink 1s ease-in-out infinite}
+@keyframes statusBlink{0%,100%{opacity:1}50%{opacity:0.3}}
+@keyframes warnBlink{0%,100%{opacity:1;box-shadow:0 0 6px #f9c74f}50%{opacity:0.4;box-shadow:none}}
+
+/* ─ PROTOCOL BRIDGE CARDS ─ */
+.proto-card{border-radius:9px;overflow:hidden;border:1px solid var(--border);transition:all .2s;cursor:default;position:relative;background:var(--surface)}
+.proto-card:hover{transform:scale(1.015);border-color:var(--border2)}
+.proto-header{display:flex;align-items:center;gap:7px;padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:10.5px;font-weight:bold;letter-spacing:1px}
+.proto-body{padding:5px 10px 7px;font-size:8.5px;color:var(--text2);line-height:1.5;background:var(--surface2)}
+.proto-tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:7.5px;font-family:'Share Tech Mono',monospace;margin-top:3px;opacity:.8}
+.proto-rate{float:right;font-size:7px;color:var(--text3);font-family:'Share Tech Mono',monospace;margin-top:2px}
+
+/* ─ MQTT BROKER ─ */
+.mqtt-broker{
+  background:radial-gradient(ellipse at center,rgba(0,229,255,0.16) 0%,rgba(0,229,255,0.02) 70%);
+  border:2px solid var(--mqtt);border-radius:14px;padding:14px 8px;text-align:center;
+  width:112px;position:relative;z-index:10;animation:bpulse 2.8s ease-in-out infinite
+}
+@keyframes bpulse{0%,100%{box-shadow:0 0 18px rgba(0,229,255,.2),inset 0 0 12px rgba(0,229,255,.04)}50%{box-shadow:0 0 48px rgba(0,229,255,.55),inset 0 0 28px rgba(0,229,255,.12)}}
+.broker-icon{font-size:24px;margin-bottom:2px}
+.broker-title{font-family:'Orbitron',monospace;font-size:11px;color:var(--mqtt);letter-spacing:2px;text-shadow:0 0 8px var(--glow)}
+.broker-sub{font-size:7.5px;color:rgba(0,229,255,0.42);margin-top:1px;letter-spacing:1px}
+.mqtt-topics{margin-top:7px;display:flex;flex-direction:column;gap:2px}
+.mqtt-topic{font-family:'Share Tech Mono',monospace;font-size:6.5px;color:rgba(0,229,255,.58);background:rgba(0,229,255,.065);border-radius:3px;padding:2px 4px;white-space:nowrap;text-align:left}
+.broker-stats{margin-top:6px;font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(0,229,255,0.32);display:flex;justify-content:space-between;gap:4px}
+
+/* ─ CONSUMER CARDS ─ */
+.consumer-card{border-radius:9px;overflow:hidden;border:1px solid var(--border);transition:all .2s;cursor:default;background:var(--surface)}
+.consumer-card:hover{transform:translateX(-3px);border-color:var(--border2)}
+.consumer-header{display:flex;align-items:center;gap:6px;padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:10px;font-weight:bold;letter-spacing:1px}
+.consumer-body{padding:5px 10px 7px;font-size:8.5px;color:var(--text2);line-height:1.5;background:var(--surface2)}
+
+/* ─ OUTPUT CARDS ─ */
+.output-card{background:var(--card-bg);border:1px solid var(--border);border-radius:7px;padding:5px 8px;display:flex;align-items:center;gap:6px;transition:all .2s;cursor:default}
+.output-card:hover{transform:translateX(-4px);border-color:var(--border2)}
+
+/* ─ FLOATING PACKET LABEL (mini) ─ */
+.pkt-label{
+  position:absolute;font-family:'Share Tech Mono',monospace;font-size:7.5px;
+  background:var(--pkt-label-bg);border:1px solid var(--border2);color:var(--text);
+  border-radius:4px;padding:2px 5px;pointer-events:none;z-index:200;
+  white-space:nowrap;transform:translate(-50%,-175%);line-height:1.4;
+  box-shadow:0 2px 12px rgba(0,0,0,0.5);transition:background .3s;
+}
+
+/* ─ CLICKABLE PACKET DOT ─ */
+.pkt-dot{
+  position:absolute;width:11px;height:11px;border-radius:50%;
+  pointer-events:all;z-index:100;cursor:pointer;
+  transform:translate(-50%,-50%);
+  transition:transform .1s;
+}
+.pkt-dot:hover{transform:translate(-50%,-50%) scale(1.6)}
+
+/* ─ PACKET TRACER MODAL ─ */
+.tracer-overlay{
+  position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.75);
+  backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;
+}
+.tracer-overlay.open{display:flex}
+.tracer-modal{
+  background:var(--modal-bg);border:1px solid rgba(0,229,255,0.25);border-radius:14px;
+  width:min(700px,95vw);max-height:88vh;overflow-y:auto;
+  box-shadow:0 0 60px rgba(0,229,255,0.12),0 30px 80px rgba(0,0,0,0.5);
+  animation:modalIn .25s ease-out;transition:background .3s;
+}
+@keyframes modalIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+.tracer-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.07);
+  background:rgba(0,229,255,0.04);border-radius:14px 14px 0 0;
+  position:sticky;top:0;z-index:10;
+}
+.tracer-header h2{font-family:'Orbitron',monospace;font-size:12px;letter-spacing:2px;color:var(--mqtt)}
+.tracer-close{background:none;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:13px;transition:all .2s}
+.tracer-close:hover{border-color:rgba(255,107,53,0.5);color:#ff6b35}
+.tracer-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+
+/* Tracer sections */
+.tracer-section{border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden}
+.tracer-section-hdr{
+  padding:7px 12px;font-family:'Share Tech Mono',monospace;font-size:10px;
+  letter-spacing:2px;display:flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,0.03);
+}
+.tracer-section-body{padding:10px 12px;background:var(--surface2)}
+
+/* Field rows */
+.field-row{display:flex;gap:8px;margin-bottom:5px;align-items:baseline;flex-wrap:wrap}
+.field-key{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text3);min-width:130px;flex-shrink:0}
+.field-val{font-family:'Share Tech Mono',monospace;font-size:9.5px;color:var(--text)}
+.field-val.highlight{color:var(--mqtt)}
+.field-val.ok{color:#76c442}.field-val.warn{color:#f9c74f}.field-val.err{color:#ff6b35}
+
+/* Hex dump */
+.hex-dump{font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--hex-dump-color);line-height:1.8;word-break:break-all;margin-top:4px}
+.hex-dump .hex-byte{display:inline-block;margin-right:3px;cursor:pointer;border-radius:2px;padding:0 1px;transition:background .1s}
+.hex-dump .hex-byte:hover{background:rgba(0,229,255,0.15);color:var(--mqtt)}
+.hex-dump .hex-addr{color:rgba(255,255,255,0.18);margin-right:8px;min-width:32px;display:inline-block}
+
+/* Frame timeline bar */
+.frame-timeline{display:flex;gap:2px;margin:6px 0;flex-wrap:wrap}
+.frame-seg{height:14px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:7px;color:rgba(0,0,0,0.8);font-weight:bold;cursor:default;min-width:24px;padding:0 3px}
+
+/* Journey path display */
+.journey{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:4px 0}
+.journey-step{font-family:'Share Tech Mono',monospace;font-size:8px;padding:2px 7px;border-radius:3px;border:1px solid rgba(255,255,255,0.1);white-space:nowrap}
+.journey-arrow{color:rgba(255,255,255,0.25);font-size:10px}
+
+/* Stats badges */
+.stat-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.stat-badge{font-family:'Share Tech Mono',monospace;font-size:8px;padding:2px 7px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.5)}
+
+/* Packet log */
+.pkt-log{max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--surface2)}
+.pkt-log-row{
+  display:grid;grid-template-columns:70px 80px 1fr 90px;
+  gap:6px;padding:3px 8px;border-bottom:1px solid var(--border);
+  font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--text2);
+  cursor:pointer;transition:background .1s;
+}
+.pkt-log-row:hover{background:rgba(0,229,255,0.06)}
+.pkt-log-row.active{background:rgba(0,229,255,0.1);color:rgba(255,255,255,0.85)}
+.pkt-log-hdr{color:rgba(255,255,255,0.2)!important;cursor:default!important;background:none!important}
+.scrollbar-thin{scrollbar-width:thin;scrollbar-color:rgba(0,229,255,0.2) transparent}
+
+/* Why section */
+.why-section{margin-top:36px;border-top:1px solid rgba(0,229,255,0.08);padding-top:20px}
+.why-title{font-family:'Orbitron',monospace;color:var(--mqtt);font-size:11px;letter-spacing:3px;text-align:center;margin-bottom:12px;text-shadow:0 0 10px var(--glow)}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.compare-box{border-radius:9px;padding:13px;border:1px solid var(--border)}
+.compare-box.bad{background:rgba(255,60,60,0.03);border-color:rgba(255,60,60,0.12)}
+.compare-box.good{background:rgba(0,229,255,0.03);border-color:rgba(0,229,255,0.12)}
+.compare-box h3{font-family:'Share Tech Mono',monospace;font-size:10px;margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.compare-box.bad h3{color:#ff6b6b}.compare-box.good h3{color:var(--mqtt)}
+.compare-box ul{list-style:none;display:flex;flex-direction:column;gap:5px}
+.compare-box ul li{font-size:10px;color:var(--text2);padding-left:13px;position:relative;line-height:1.5}
+.compare-box ul li::before{content:'▸';position:absolute;left:0;color:var(--text3)}
+.compare-box.bad ul li::before{color:#ff6b6b66}.compare-box.good ul li::before{color:var(--mqtt)}
+.why-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:9px;margin-top:12px}
+.why-card{background:var(--card-bg);border:1px solid var(--border);border-radius:9px;padding:11px;transition:border-color .3s,background .3s}
+.why-card:hover{border-color:rgba(0,229,255,0.2);background:rgba(0,229,255,0.035)}
+.why-card h3{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--mqtt);margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.why-card p{font-size:10px;color:var(--text2);line-height:1.6}
+
+/* ─ THEME BUTTON ─ */
+.btn-theme{
+  font-family:'Orbitron',monospace;font-size:10px;
+  padding:7px 12px;border-radius:6px;cursor:pointer;
+  background:rgba(255,255,255,0.05);border:1.5px solid var(--border2);
+  color:var(--text);transition:all .2s;white-space:nowrap;
+  display:flex;align-items:center;gap:5px;
+}
+.btn-theme:hover{background:rgba(255,255,255,0.12);box-shadow:0 0 10px rgba(255,255,255,0.1)}
+html.light .btn-theme{background:rgba(0,0,0,0.04);border-color:rgba(0,0,0,0.15)}
+html.light .btn-theme:hover{background:rgba(0,0,0,0.08)}
+
+/* ─ LIGHT THEME OVERRIDES ─ */
+html.light .title-block p{color:rgba(0,0,0,0.35)}
+html.light .legend-item{color:rgba(0,0,0,0.45)}
+html.light .col-label{color:rgba(0,0,0,0.3)}
+html.light .tracer-section{border-color:rgba(0,0,0,0.08)}
+html.light .tracer-section-hdr{background:rgba(0,0,0,0.03)}
+html.light .tracer-header{background:rgba(0,120,200,0.05)}
+html.light .speed-wrap{color:rgba(0,0,0,0.4)}
+html.light .speed-wrap select{background:#f5f8ff;color:#0d1a2e;border-color:rgba(0,0,0,0.15)}
+html.light .pkt-counter{color:rgba(0,100,200,0.7)}
+html.light .stat-badge{border-color:rgba(0,0,0,0.1);color:rgba(0,0,0,0.5)}
+html.light .journey-arrow{color:rgba(0,0,0,0.2)}
+html.light .hex-dump .hex-addr{color:rgba(0,0,0,0.25)}
+html.light .pkt-log-hdr{color:rgba(0,0,0,0.25)!important}
+html.light .pkt-log-row.active{background:rgba(0,120,200,0.08)}
+html.light .pkt-log-row:hover{background:rgba(0,120,200,0.05)}
+html.light .mqtt-broker{background:radial-gradient(ellipse at center,rgba(0,120,200,0.12) 0%,rgba(0,120,200,0.02) 70%)}
+html.light .broker-title{color:#0070cc;text-shadow:0 0 8px rgba(0,112,204,0.3)}
+html.light .broker-sub{color:rgba(0,100,200,0.5)}
+html.light .mqtt-topic{color:rgba(0,100,200,0.7);background:rgba(0,100,200,0.06)}
+html.light .broker-stats{color:rgba(0,100,200,0.4)}
+html.light .why-section{border-top-color:rgba(0,100,200,0.1)}
+@media(max-width:900px){.arch{grid-template-columns:120px 1fr 105px 1fr 120px}.compare{grid-template-columns:1fr}}
+@media(max-width:640px){.arch{grid-template-columns:1fr}#arch-svg{display:none}.col-center{align-items:stretch}}
+
+/* ENCRYPTION BADGES */
+.enc-badge{display:inline-flex;align-items:center;gap:3px;font-family:'Share Tech Mono',monospace;font-size:7px;padding:1px 5px;border-radius:10px;margin:2px 2px 0 0;border:1px solid;white-space:nowrap}
+.enc-yes{background:rgba(118,196,66,0.12);border-color:rgba(118,196,66,0.4);color:#76c442}
+.enc-opt{background:rgba(249,199,79,0.1);border-color:rgba(249,199,79,0.4);color:#f9c74f}
+.enc-no{background:rgba(255,107,53,0.1);border-color:rgba(255,107,53,0.35);color:#ff6b35}
+.enc-partial{background:rgba(76,201,240,0.1);border-color:rgba(76,201,240,0.35);color:#4cc9f0}
+.enc-row{display:flex;flex-wrap:wrap;gap:2px;margin-top:4px;padding-top:4px;border-top:1px solid var(--border)}
+/* BROKER CLICK */
+.mqtt-broker{cursor:pointer}
+.mqtt-broker:hover{transform:scale(1.04)}
+.broker-hint{font-family:'Share Tech Mono',monospace;font-size:6px;color:rgba(0,229,255,0.45);margin-top:5px;letter-spacing:1px;animation:hintPulse 2s ease-in-out infinite}
+@keyframes hintPulse{0%,100%{opacity:.4}50%{opacity:1}}
+/* BROKER MODAL */
+.broker-overlay{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.82);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center}
+.broker-overlay.open{display:flex}
+.broker-modal{background:var(--modal-bg);border:2px solid rgba(0,229,255,0.28);border-radius:16px;width:min(980px,97vw);max-height:92vh;overflow-y:auto;box-shadow:0 0 80px rgba(0,229,255,0.14),0 40px 100px rgba(0,0,0,0.7);animation:modalIn .28s ease-out;transition:background .3s}
+.broker-modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid rgba(0,229,255,0.12);background:rgba(0,229,255,0.04);border-radius:16px 16px 0 0;position:sticky;top:0;z-index:10}
+.broker-modal-hdr h2{font-family:'Orbitron',monospace;font-size:13px;letter-spacing:2px;color:var(--mqtt)}
+.broker-modal-body{padding:20px 22px;display:flex;flex-direction:column;gap:20px}
+.modal-section-hdr{font-family:'Orbitron',monospace;font-size:10px;letter-spacing:2px;color:var(--mqtt);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(0,229,255,0.1);display:flex;align-items:center;gap:8px}
+/* Arch diagram */
+.arch-diagram{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px;overflow-x:auto}
+.arch-diagram-title{font-family:'Share Tech Mono',monospace;font-size:8px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-bottom:14px;text-align:center}
+/* Broker internal blocks */
+.broker-internals{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0}
+.b-block{border-radius:8px;padding:10px 12px;text-align:center;border:1px solid;min-width:100px;flex:1;max-width:150px}
+.b-block-title{font-family:'Share Tech Mono',monospace;font-size:8.5px;font-weight:bold;margin-bottom:3px}
+.b-block-sub{font-size:7.5px;color:var(--text2);line-height:1.5}
+/* Enc table */
+.enc-table{width:100%;border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:8.5px}
+.enc-table th{padding:6px 10px;text-align:left;color:var(--text3);border-bottom:1px solid var(--border);font-weight:normal;letter-spacing:1px;font-size:8px}
+.enc-table td{padding:5px 10px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:top;font-size:8.5px}
+.enc-table tr:last-child td{border-bottom:none}
+.enc-tier{font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:700;color:var(--text)}
+/* Flow diagram */
+.flow-diagram{display:flex;align-items:center;gap:0;overflow-x:auto;padding:8px 0;flex-wrap:nowrap}
+.flow-node{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:78px;flex-shrink:0}
+.flow-node-box{border-radius:7px;padding:6px 8px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:7.5px;border:1px solid;width:100%}
+.flow-arrow{display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 3px;flex-shrink:0;min-width:46px}
+.flow-arrow-line{height:2px;width:100%;border-radius:1px}
+.flow-arrow-label{font-family:'Share Tech Mono',monospace;font-size:6px;white-space:nowrap;text-align:center;color:var(--text3)}
+.flow-arrow-enc{font-size:6px;text-align:center;white-space:nowrap}
+/* Rec grid */
+.rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.rec-card{background:var(--card-bg);border:1px solid var(--border);border-radius:9px;padding:12px}
+.rec-card h4{font-family:'Share Tech Mono',monospace;font-size:9px;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.rec-card p{font-size:9px;color:var(--text2);line-height:1.6}
+html.light .broker-hint{color:rgba(0,100,200,0.5)}
+
+/* ─ ZOOM / PAN VIEWPORT ─ */
+.sim-viewport{
+  overflow:hidden;position:relative;width:100%;
+  border:1px solid var(--border);border-radius:12px;
+  background:var(--surface);cursor:grab;user-select:none;
+  height:72vh;min-height:480px;
+}
+.sim-viewport.grabbing{cursor:grabbing}
+.sim-canvas{
+  position:absolute;transform-origin:0 0;
+  padding:28px 20px 40px;
+  will-change:transform;
+}
+/* ─ ZOOM CONTROLS ─ */
+.zoom-controls{
+  position:absolute;bottom:16px;right:16px;z-index:50;
+  display:flex;flex-direction:column;gap:5px;
+  background:var(--surface2);border:1px solid var(--border2);
+  border-radius:10px;padding:8px 6px;
+  box-shadow:0 4px 20px rgba(0,0,0,0.4);
+}
+.zoom-btn{
+  width:32px;height:32px;border-radius:7px;
+  background:transparent;border:1px solid var(--border);
+  color:var(--text2);font-size:16px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s;font-family:'Share Tech Mono',monospace;
+}
+.zoom-btn:hover{background:rgba(0,229,255,0.15);border-color:rgba(0,229,255,0.5);color:var(--mqtt);box-shadow:0 0 10px rgba(0,229,255,0.2)}
+.zoom-label{
+  font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text3);
+  text-align:center;padding:2px 0;white-space:nowrap;letter-spacing:1px;
+}
+.zoom-divider{height:1px;background:var(--border);margin:2px 0}
+/* ─ MINIMAP ─ */
+.minimap{
+  position:absolute;bottom:16px;left:16px;z-index:50;
+  width:130px;height:80px;border-radius:9px;
+  background:var(--surface2);border:1px solid var(--border2);
+  overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.4);
+}
+.minimap canvas{position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.5}
+.minimap-vp-indicator{
+  position:absolute;border:1.5px solid rgba(0,229,255,0.7);
+  border-radius:3px;background:rgba(0,229,255,0.1);
+  pointer-events:none;transition:left .08s,top .08s,width .08s,height .08s;
+}
+.minimap-label{
+  position:absolute;bottom:3px;left:0;right:0;
+  font-family:'Share Tech Mono',monospace;font-size:6px;color:rgba(0,229,255,0.35);
+  text-align:center;letter-spacing:1px;pointer-events:none;
+}
+/* ─ PAN HINT ─ */
+.pan-hint{
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:50;
+  font-family:'Share Tech Mono',monospace;font-size:8px;color:rgba(0,229,255,0.35);
+  letter-spacing:2px;pointer-events:none;white-space:nowrap;
+  animation:fadeHint 4s ease forwards;
+}
+@keyframes fadeHint{0%{opacity:0}10%{opacity:1}70%{opacity:1}100%{opacity:0}}
+
+/* ─ CLEAN ARCH MODAL ─ */
+.arch-modal-overlay{
+  position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.88);
+  backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;
+}
+.arch-modal-overlay.open{display:flex}
+.arch-modal{
+  background:var(--modal-bg);border:1.5px solid rgba(0,229,255,0.2);
+  border-radius:18px;width:min(1020px,97vw);max-height:92vh;
+  overflow-y:auto;overflow-x:hidden;
+  box-shadow:0 0 100px rgba(0,229,255,0.08),0 50px 120px rgba(0,0,0,0.85);
+  animation:modalIn .28s cubic-bezier(.22,.8,.3,1);transition:background .3s;
+}
+.arch-modal-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 24px;border-bottom:1px solid rgba(0,229,255,0.1);
+  background:rgba(0,229,255,0.035);border-radius:18px 18px 0 0;
+  position:sticky;top:0;z-index:10;gap:12px;flex-wrap:wrap;
+}
+.arch-modal-hdr h2{font-family:'Orbitron',monospace;font-size:13px;letter-spacing:2px;color:var(--mqtt);flex:1;min-width:200px}
+.arch-modal-body{padding:20px 24px;display:flex;flex-direction:column;gap:20px}
+/* ─ LAYER STACK ─ */
+.node-arch{display:flex;flex-direction:column;gap:0}
+.layer-row{display:flex;gap:0;align-items:stretch}
+.layer-label-col{
+  width:120px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;
+  padding:12px 12px 12px 0;font-family:'Share Tech Mono',monospace;font-size:7.5px;
+  letter-spacing:1.5px;text-transform:uppercase;text-align:right;line-height:1.5;
+  border-right:2px solid;
+}
+.layer-boxes-col{flex:1;padding:10px 0 10px 14px;display:flex;align-items:stretch}
+.node-boxes{display:flex;gap:8px;flex:1;flex-wrap:wrap;align-items:stretch}
+.node-box{
+  border-radius:9px;padding:10px 13px;flex:1;min-width:120px;max-width:220px;
+  font-family:'Share Tech Mono',monospace;font-size:8px;border:1px solid;
+  transition:transform .15s,box-shadow .15s;cursor:default;
+}
+.node-box:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+.node-box-title{font-size:9.5px;font-weight:bold;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.node-box-sub{color:var(--text2);line-height:1.6;font-size:7.5px}
+.node-box-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:7px}
+.node-tag{font-size:6.5px;padding:2px 6px;border-radius:8px;border:1px solid;white-space:nowrap;letter-spacing:.5px}
+/* Inter-layer connector */
+.layer-connector{
+  display:flex;align-items:center;gap:0;
+  margin:0;padding:0;height:28px;
+}
+.layer-connector-indent{width:120px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;padding-right:12px}
+.layer-connector-line{
+  flex:1;margin-left:14px;display:flex;align-items:center;gap:8px;
+  font-family:'Share Tech Mono',monospace;font-size:7.5px;color:var(--text3);
+}
+.layer-connector-line::before{content:'';height:1px;width:18px;background:var(--border)}
+.layer-connector-line::after{content:'▼';font-size:9px}
+/* ─ FLOW CHAIN ─ */
+.flow-chain{
+  display:flex;align-items:center;flex-wrap:wrap;gap:0;
+  padding:10px 14px;background:var(--surface2);border-radius:9px;
+  border:1px solid var(--border);
+}
+.flow-chip{
+  font-family:'Share Tech Mono',monospace;font-size:8px;
+  padding:4px 10px;border-radius:5px;border:1px solid;white-space:nowrap;
+}
+.flow-arr{color:var(--text3);padding:0 5px;font-size:11px;flex-shrink:0}
+/* ─ PACKAGE GRID ─ */
+.pkg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:9px}
+.pkg-card{
+  background:var(--card-bg);border:1px solid var(--border);border-radius:9px;
+  padding:11px 13px;transition:border-color .2s;
+}
+.pkg-card:hover{border-color:var(--border2)}
+.pkg-card h4{font-family:'Share Tech Mono',monospace;font-size:9px;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.pkg-card p{font-size:8px;color:var(--text2);line-height:1.6}
+/* ─ DOCKER BLOCK ─ */
+.docker-block{
+  background:var(--surface2);border:1px solid var(--border);border-radius:9px;
+  padding:14px 18px;font-family:'Share Tech Mono',monospace;font-size:8px;
+  color:var(--text2);line-height:2;overflow-x:auto;
+}
+</style>
+</head>
+<body>
+
+
+<!-- ══════════════════════════════════════════════════
+     BROKER ARCHITECTURE MODAL
+══════════════════════════════════════════════════ -->
+<div class="broker-overlay" id="brokerOverlay">
+  <div class="broker-modal">
+    <div class="broker-modal-hdr">
+      <h2>⚡ MQTT BROKER — SYSTEM ARCHITECTURE</h2>
+      <button class="tracer-close" onclick="closeBrokerModal()">✕ CLOSE</button>
+    </div>
+    <div class="broker-modal-body">
+
+      <!-- FLOW DIAGRAM -->
+      <div>
+        <div class="modal-section-hdr">🔁 END-TO-END DATA FLOW WITH ENCRYPTION ZONES</div>
+        <div class="arch-diagram">
+          <div class="arch-diagram-title">COMPLETE PIPELINE — FIELD TO OUTPUT</div>
+          <div class="flow-diagram" id="flowDiagram">
+
+            <div class="flow-node">
+              <div class="flow-node-box" style="border-color:#ff6b35;background:rgba(255,107,53,0.08);color:#ff6b35">🏭 Field<br>Devices</div>
+              <span style="font-size:7px;color:var(--text3);text-align:center">PLC/BMS<br>Sensors</span>
+            </div>
+            <div class="flow-arrow">
+              <div class="flow-arrow-line" style="background:#ff6b35;opacity:0.5"></div>
+              <div class="flow-arrow-label">Raw Protocol</div>
+              <div class="flow-arrow-enc" style="color:#ff6b35">🔓 plaintext</div>
+            </div>
+
+            <div class="flow-node">
+              <div class="flow-node-box" style="border-color:#f9c74f;background:rgba(249,199,79,0.08);color:#f9c74f">🔌 Protocol<br>Bridge</div>
+              <span style="font-size:7px;color:var(--text3);text-align:center">Modbus/BACnet<br>SNMP/CAN/Zigbee</span>
+            </div>
+            <div class="flow-arrow">
+              <div class="flow-arrow-line" style="background:#00e5ff;opacity:0.6"></div>
+              <div class="flow-arrow-label">MQTT :8883</div>
+              <div class="flow-arrow-enc" style="color:#76c442">🔒 TLS 1.3</div>
+            </div>
+
+            <div class="flow-node">
+              <div class="flow-node-box" style="border-color:#00e5ff;background:rgba(0,229,255,0.1);color:#00e5ff;font-weight:bold">⚡ MQTT<br>BROKER</div>
+              <span style="font-size:7px;color:var(--text3);text-align:center">Mosquitto 2.0<br>:1883/:8883/:9001</span>
+            </div>
+            <div class="flow-arrow">
+              <div class="flow-arrow-line" style="background:#00e5ff;opacity:0.6"></div>
+              <div class="flow-arrow-label">MQTT :8883</div>
+              <div class="flow-arrow-enc" style="color:#76c442">🔒 TLS 1.3</div>
+            </div>
+
+            <div class="flow-node">
+              <div class="flow-node-box" style="border-color:#ffd60a;background:rgba(255,214,10,0.08);color:#ffd60a">🗄️ Subscriber<br>Services</div>
+              <span style="font-size:7px;color:var(--text3);text-align:center">InfluxDB<br>TimescaleDB</span>
+            </div>
+            <div class="flow-arrow">
+              <div class="flow-arrow-line" style="background:#56cfe1;opacity:0.5"></div>
+              <div class="flow-arrow-label">HTTPS/WSS</div>
+              <div class="flow-arrow-enc" style="color:#76c442">🔒 TLS 1.3</div>
+            </div>
+
+            <div class="flow-node">
+              <div class="flow-node-box" style="border-color:#56cfe1;background:rgba(86,207,225,0.08);color:#56cfe1">🖥️ Output<br>Systems</div>
+              <span style="font-size:7px;color:var(--text3);text-align:center">Grafana/SCADA<br>ML/Alerts</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- BROKER INTERNAL ARCHITECTURE -->
+      <div>
+        <div class="modal-section-hdr">🏗️ BROKER INTERNAL ARCHITECTURE — MOSQUITTO 2.0</div>
+        <div class="arch-diagram">
+          <div style="display:flex;flex-direction:column;gap:10px">
+
+            <!-- Listeners row -->
+            <div style="text-align:center;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--text3);letter-spacing:2px;margin-bottom:4px">LISTENERS / TRANSPORTS</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+              <div class="b-block" style="border-color:rgba(255,107,53,0.4);background:rgba(255,107,53,0.06)">
+                <div class="b-block-title" style="color:#ff6b35">:1883 MQTT</div>
+                <div class="b-block-sub">Plain TCP<br>Internal only<br><span class="enc-badge enc-no" style="margin-top:3px">🔓 no TLS</span></div>
+              </div>
+              <div class="b-block" style="border-color:rgba(118,196,66,0.4);background:rgba(118,196,66,0.06)">
+                <div class="b-block-title" style="color:#76c442">:8883 MQTTS</div>
+                <div class="b-block-sub">TLS 1.3 TCP<br>External clients<br><span class="enc-badge enc-yes" style="margin-top:3px">🔒 mTLS</span></div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.4);background:rgba(0,229,255,0.06)">
+                <div class="b-block-title" style="color:#00e5ff">:9001 WS</div>
+                <div class="b-block-sub">WebSocket<br>Browser clients<br><span class="enc-badge enc-opt" style="margin-top:3px">⚠ Use WSS!</span></div>
+              </div>
+              <div class="b-block" style="border-color:rgba(118,196,66,0.4);background:rgba(118,196,66,0.06)">
+                <div class="b-block-title" style="color:#76c442">:9002 WSS</div>
+                <div class="b-block-sub">WebSocket+TLS<br>Secure browser<br><span class="enc-badge enc-yes" style="margin-top:3px">🔒 TLS 1.3</span></div>
+              </div>
+            </div>
+
+            <!-- Arrow down -->
+            <div style="text-align:center;font-size:16px;color:var(--text3)">▼</div>
+
+            <!-- Auth + ACL row -->
+            <div style="text-align:center;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--text3);letter-spacing:2px;margin-bottom:4px">AUTHENTICATION &amp; AUTHORISATION</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">X.509 mTLS</div>
+                <div class="b-block-sub">Client cert auth<br>CA-signed certs<br>Device identity</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">Username/PW</div>
+                <div class="b-block-sub">password_file<br>bcrypt hashed<br>plugin: auth-go</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">ACL File</div>
+                <div class="b-block-sub">Topic-level perms<br>read/write/deny<br>per client ID</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">JWT Plugin</div>
+                <div class="b-block-sub">Token validation<br>Dynamic auth<br>OAuth2 compat</div>
+              </div>
+            </div>
+
+            <!-- Arrow down -->
+            <div style="text-align:center;font-size:16px;color:var(--text3)">▼</div>
+
+            <!-- Broker core -->
+            <div style="text-align:center;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--text3);letter-spacing:2px;margin-bottom:4px">BROKER CORE ENGINE</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+              <div class="b-block" style="border-color:rgba(0,229,255,0.5);background:rgba(0,229,255,0.08);flex:2;max-width:280px">
+                <div class="b-block-title" style="color:#00e5ff">Message Router</div>
+                <div class="b-block-sub">Topic matching · wildcard support<br># and + wildcards · $SYS topics<br>Retained message store<br>In-flight queue per subscriber</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">QoS Engine</div>
+                <div class="b-block-sub">QoS 0: fire &amp; forget<br>QoS 1: at least once<br>QoS 2: exactly once<br>PUBACK/PUBREL</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04)">
+                <div class="b-block-title" style="color:#00e5ff">Session Mgr</div>
+                <div class="b-block-sub">Persistent sessions<br>Will messages<br>Clean session flag<br>Offline buffering</div>
+              </div>
+            </div>
+
+            <!-- Arrow down -->
+            <div style="text-align:center;font-size:16px;color:var(--text3)">▼</div>
+
+            <!-- Persistence + HA -->
+            <div style="text-align:center;font-family:'Share Tech Mono',monospace;font-size:8px;color:var(--text3);letter-spacing:2px;margin-bottom:4px">PERSISTENCE &amp; HIGH AVAILABILITY</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+              <div class="b-block" style="border-color:rgba(255,159,28,0.35);background:rgba(255,159,28,0.05)">
+                <div class="b-block-title" style="color:#ff9f1c">mosquitto.db</div>
+                <div class="b-block-sub">Retained msgs<br>QoS 1/2 queue<br>Session state</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(255,159,28,0.35);background:rgba(255,159,28,0.05)">
+                <div class="b-block-title" style="color:#ff9f1c">Bridge Mode</div>
+                <div class="b-block-sub">Broker-to-broker<br>Cloud forwarding<br>AWS IoT / Azure</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(255,159,28,0.35);background:rgba(255,159,28,0.05)">
+                <div class="b-block-title" style="color:#ff9f1c">Clustering</div>
+                <div class="b-block-sub">EMQX / HiveMQ<br>Kafka bridge<br>Horizontal scale</div>
+              </div>
+              <div class="b-block" style="border-color:rgba(255,159,28,0.35);background:rgba(255,159,28,0.05)">
+                <div class="b-block-title" style="color:#ff9f1c">Monitoring</div>
+                <div class="b-block-sub">$SYS/# topics<br>Prometheus expt<br>Grafana dashbrd</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENCRYPTION TABLE -->
+      <div>
+        <div class="modal-section-hdr">🔐 ENCRYPTION STATUS BY SEGMENT</div>
+        <div class="arch-diagram" style="padding:0;overflow:auto">
+          <table class="enc-table">
+            <thead>
+              <tr>
+                <th>SEGMENT</th>
+                <th>PROTOCOL</th>
+                <th>DEFAULT</th>
+                <th>ENCRYPTED OPTION</th>
+                <th>AUTH METHOD</th>
+                <th>RECOMMENDED</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="enc-tier">Field → Bridge</span></td>
+                <td style="color:#ff6b35">Modbus TCP/RTU</td>
+                <td><span class="enc-badge enc-no">🔓 plaintext</span></td>
+                <td>VPN / TLS tunnel / IPSec</td>
+                <td>None (slave addr)</td>
+                <td>Isolate on VLAN + VPN</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Field → Bridge</span></td>
+                <td style="color:#f9c74f">BACnet/IP</td>
+                <td><span class="enc-badge enc-no">🔓 plaintext</span></td>
+                <td>BACnet/SC (ASHRAE 135-2020)</td>
+                <td>Shared key / SC cert</td>
+                <td>Upgrade to BACnet/SC</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Field → Bridge</span></td>
+                <td style="color:#4cc9f0">SNMP</td>
+                <td><span class="enc-badge enc-no">🔓 v1/v2c clear</span></td>
+                <td><span class="enc-badge enc-yes">🔒 SNMPv3 AES-256</span></td>
+                <td>USM: MD5/SHA + AES</td>
+                <td>Enforce SNMPv3 only</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Field → Bridge</span></td>
+                <td style="color:#76c442">Zigbee</td>
+                <td><span class="enc-badge enc-yes">🔒 AES-128 MAC</span></td>
+                <td>Full stack: NWK+APS keys</td>
+                <td>Pre-shared network key</td>
+                <td>Rotate keys periodically</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Field → Bridge</span></td>
+                <td style="color:#c77dff">CANbus / BMS</td>
+                <td><span class="enc-badge enc-no">🔓 no encrypt</span></td>
+                <td>Physical isolation / CAN FD ext</td>
+                <td>Physical bus only</td>
+                <td>Isolate, add gateway auth</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Bridge → Broker</span></td>
+                <td style="color:#00e5ff">MQTT :1883</td>
+                <td><span class="enc-badge enc-no">🔓 plaintext</span></td>
+                <td><span class="enc-badge enc-yes">🔒 TLS :8883</span></td>
+                <td>Username/PW or cert</td>
+                <td>Always use :8883 + mTLS</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Broker → Consumer</span></td>
+                <td style="color:#00e5ff">MQTT :8883</td>
+                <td><span class="enc-badge enc-yes">🔒 TLS 1.3</span></td>
+                <td>mTLS + ACL topic rules</td>
+                <td>X.509 cert / JWT</td>
+                <td>mTLS + ACL per service</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Broker → Browser</span></td>
+                <td style="color:#56cfe1">MQTT WebSocket</td>
+                <td><span class="enc-badge enc-opt">⚠ WS :9001</span></td>
+                <td><span class="enc-badge enc-yes">🔒 WSS :9002</span></td>
+                <td>JWT token</td>
+                <td>Always use WSS :9002</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Consumer → DB</span></td>
+                <td style="color:#ffd60a">InfluxDB / TSDB</td>
+                <td><span class="enc-badge enc-yes">🔒 HTTPS :8086</span></td>
+                <td>TLS + token auth</td>
+                <td>API token (bearer)</td>
+                <td>Rotate tokens, use TLS</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">Consumer → DB</span></td>
+                <td style="color:#ffd60a">TimescaleDB</td>
+                <td><span class="enc-badge enc-opt">⚠ optional SSL</span></td>
+                <td><span class="enc-badge enc-yes">🔒 sslmode=require</span></td>
+                <td>pg cert + password</td>
+                <td>sslmode=verify-full</td>
+              </tr>
+              <tr>
+                <td><span class="enc-tier">UI Layer</span></td>
+                <td style="color:#56cfe1">Grafana / SCADA</td>
+                <td><span class="enc-badge enc-yes">🔒 HTTPS :443</span></td>
+                <td>TLS + OAuth2/SAML</td>
+                <td>OAuth2 / LDAP / SAML</td>
+                <td>HTTPS + MFA enforced</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- DEPLOYMENT TOPOLOGY -->
+      <div>
+        <div class="modal-section-hdr">🏛️ RECOMMENDED DEPLOYMENT TOPOLOGY</div>
+        <div class="arch-diagram">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+
+            <div style="border:1px solid rgba(255,107,53,0.3);border-radius:8px;padding:12px;background:rgba(255,107,53,0.04)">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#ff6b35;margin-bottom:8px;letter-spacing:1px">🔴 OT ZONE (Level 0–1)</div>
+              <div style="font-size:8.5px;color:var(--text2);line-height:1.8">
+                • Field devices (PLC, BMS, sensors)<br>
+                • Physical/serial bus isolation<br>
+                • No direct internet access<br>
+                • VLAN segmented from IT<br>
+                • Protocol bridges in DMZ<br>
+                <span class="enc-badge enc-no" style="margin-top:4px">🔓 Most protocols unencrypted here</span>
+              </div>
+            </div>
+
+            <div style="border:1px solid rgba(249,199,79,0.3);border-radius:8px;padding:12px;background:rgba(249,199,79,0.04)">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#f9c74f;margin-bottom:8px;letter-spacing:1px">🟡 DMZ / EDGE ZONE (Level 2)</div>
+              <div style="font-size:8.5px;color:var(--text2);line-height:1.8">
+                • Protocol bridge containers<br>
+                • MQTT broker (Mosquitto/EMQX)<br>
+                • Firewall inbound :8883 only<br>
+                • Certificates from internal CA<br>
+                • No direct DB access<br>
+                <span class="enc-badge enc-yes" style="margin-top:4px">🔒 TLS required at this boundary</span>
+              </div>
+            </div>
+
+            <div style="border:1px solid rgba(0,229,255,0.3);border-radius:8px;padding:12px;background:rgba(0,229,255,0.04)">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#00e5ff;margin-bottom:8px;letter-spacing:1px">🔵 IT ZONE (Level 3)</div>
+              <div style="font-size:8.5px;color:var(--text2);line-height:1.8">
+                • InfluxDB / TimescaleDB<br>
+                • Grafana / SCADA server<br>
+                • Node-RED automation<br>
+                • Internal CA cert mgmt<br>
+                • SIEM log collection<br>
+                <span class="enc-badge enc-yes" style="margin-top:4px">🔒 TLS + auth everywhere</span>
+              </div>
+            </div>
+
+            <div style="border:1px solid rgba(118,196,66,0.3);border-radius:8px;padding:12px;background:rgba(118,196,66,0.04)">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#76c442;margin-bottom:8px;letter-spacing:1px">🟢 CLOUD / REMOTE (Level 4)</div>
+              <div style="font-size:8.5px;color:var(--text2);line-height:1.8">
+                • Broker bridge → AWS IoT Core<br>
+                • Remote Grafana (HTTPS only)<br>
+                • Mobile app (JWT + WSS)<br>
+                • VPN for admin access<br>
+                • Zero-trust access policy<br>
+                <span class="enc-badge enc-yes" style="margin-top:4px">🔒 mTLS + zero-trust required</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- BEST PRACTICES -->
+      <div>
+        <div class="modal-section-hdr">✅ SECURITY BEST PRACTICES</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+          <div class="rec-card"><h4 style="color:#76c442">🔒 TLS Everywhere</h4><p>Use TLS 1.3 on all MQTT connections. Disable :1883 in production. Use Let's Encrypt or internal CA for broker certs.</p></div>
+          <div class="rec-card"><h4 style="color:#76c442">🎫 mTLS for Bridges</h4><p>Issue each bridge service a unique X.509 client certificate. Broker validates client certs — prevents rogue publishers.</p></div>
+          <div class="rec-card"><h4 style="color:#f9c74f">📋 ACL Per Service</h4><p>InfluxDB should only SUBSCRIBE to its topics. Bridges should only PUBLISH. Enforce read/write ACLs per client ID.</p></div>
+          <div class="rec-card"><h4 style="color:#f9c74f">🔄 Key Rotation</h4><p>Rotate MQTT passwords and API tokens every 90 days. Use short-lived JWT tokens (15 min) for browser clients via WSS.</p></div>
+          <div class="rec-card"><h4 style="color:#4cc9f0">🛡️ Network Segmentation</h4><p>OT devices on isolated VLAN. Broker in DMZ. Only port 8883 exposed. Never expose :1883 or databases to the internet.</p></div>
+          <div class="rec-card"><h4 style="color:#4cc9f0">📊 Audit &amp; Monitor</h4><p>Subscribe to $SYS/# for broker metrics. Feed logs into SIEM. Alert on unexpected client connects or topic violations.</p></div>
+        </div>
+      </div>
+
+    </div><!-- /broker-modal-body -->
+  </div><!-- /broker-modal -->
+</div><!-- /broker-overlay -->
+
+<!-- ══════════════════════════════════════════════════
+     CLEAN ARCHITECTURE MODAL
+══════════════════════════════════════════════════ -->
+<div class="arch-modal-overlay" id="archModalOverlay">
+  <div class="arch-modal">
+    <div class="arch-modal-hdr">
+      <h2 id="archModalTitle">🏗 NODE.JS CLEAN ARCHITECTURE</h2>
+      <div id="archModalBadge" style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:3px 10px;border-radius:10px;border:1px solid;white-space:nowrap"></div>
+      <button class="tracer-close" onclick="closeArchModal()">✕ CLOSE</button>
+    </div>
+    <div class="arch-modal-body" id="archModalBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     PACKET TRACER MODAL
+══════════════════════════════════════════════════ -->
+<div class="tracer-overlay" id="tracerOverlay">
+  <div class="tracer-modal">
+    <div class="tracer-header">
+      <h2 id="tracerTitle">⬡ PACKET TRACER</h2>
+      <button class="tracer-close" onclick="closeTracer()">✕ CLOSE</button>
+    </div>
+    <div class="tracer-body" id="tracerBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     MAIN SCENE
+══════════════════════════════════════════════════ -->
+<div class="scene">
+
+<div class="header-row">
+  <div class="title-block">
+    <h1>⚡ PROTOCOL → MQTT UNIFIED DATA BUS</h1>
+    <p>Field Devices · Bridge Services · MQTT Broker · Subscribers · Outputs</p>
+  </div>
+  <div class="controls">
+    <div class="speed-wrap">
+      SPD
+      <select id="speedSelect" onchange="setSpeed(this.value)">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="3">3×</option>
+      </select>
+    </div>
+    <div class="pkt-counter">PKTS: <span id="pktCount">0</span></div>
+    <button class="btn-pause" id="pauseBtn" onclick="togglePause()">⏸ PAUSE</button>
+    <button class="btn-theme" id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark theme">🌙 DARK</button>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--modbus)"></div>Modbus TCP/RTU</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--bacnet)"></div>BACnet</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--snmp)"></div>SNMP</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--zigbee)"></div>Zigbee</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--canbus)"></div>CANbus/BMS</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--mqtt)"></div>MQTT Broker</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--db)"></div>Databases</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--fe)"></div>Frontend</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b3b3b;border:1px solid rgba(255,255,255,0.2)"></div>Click packet for details</div>
+  <div class="legend-item" style="border-left:1px solid rgba(255,255,255,0.1);padding-left:7px"><span style="color:rgba(255,255,255,0.5);font-size:9px">━━▶</span>&nbsp;Telemetry (→)</div>
+  <div class="legend-item"><span style="color:rgba(255,159,28,0.8);font-size:9px">◄━━</span>&nbsp;Command / ACK (←)</div>
+  <div class="legend-item" style="border-left:1px solid rgba(255,255,255,0.1);padding-left:7px;color:rgba(0,229,255,0.5)">🖱 Scroll=zoom · Drag=pan</div>
+  <div class="legend-item" style="color:rgba(0,229,255,0.5)">🏗 Click Bridge/Broker = Architecture</div>
+</div>
+
+<div class="sim-viewport" id="simViewport">
+  <div class="sim-canvas" id="simCanvas">
+    <div class="arch-wrap" id="arch-wrap">
+    <svg id="arch-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="arch" id="arch">
+
+  <!-- ═══════ COL 1: FIELD DEVICES ═══════ -->
+  <div class="col col-devices" id="col-devices">
+    <div class="col-label">FIELD DEVICES</div>
+
+    <!-- MODBUS devices -->
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="device-card" id="dev-plc" style="border-color:rgba(255,107,53,0.3)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🏭</span>
+        <div><div class="device-name" style="color:var(--modbus)">PLC Siemens S7</div>
+        <div class="device-val">Reg 0x0010: <span id="v-plc">23.4</span>°C | Coil:1</div></div>
+      </div>
+      <div class="device-card" id="dev-meter" style="border-color:rgba(255,107,53,0.2)">
+        <div class="device-status online"></div>
+        <span class="device-icon">⚡</span>
+        <div><div class="device-name" style="color:var(--modbus)">Schneider PM5500</div>
+        <div class="device-val">kWh:<span id="v-meter">412.7</span> V:<span id="v-volt">231</span>A:<span id="v-amp">14.2</span></div></div>
+      </div>
+    </div>
+
+    <!-- BACNET devices -->
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="device-card" id="dev-hvac" style="border-color:rgba(249,199,79,0.3)">
+        <div class="device-status online"></div>
+        <span class="device-icon">❄️</span>
+        <div><div class="device-name" style="color:var(--bacnet)">Carrier AHU-3</div>
+        <div class="device-val">SP:<span id="v-hvac">21.0</span>°C PV:<span id="v-hvac2">20.8</span>°C</div></div>
+      </div>
+      <div class="device-card" id="dev-vav" style="border-color:rgba(249,199,79,0.2)">
+        <div class="device-status warn"></div>
+        <span class="device-icon">💨</span>
+        <div><div class="device-name" style="color:var(--bacnet)">Trane VAV-12</div>
+        <div class="device-val">Flow:<span id="v-vav">380</span>CFM Damper:<span id="v-damp">67</span>%</div></div>
+      </div>
+    </div>
+
+    <!-- SNMP devices -->
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="device-card" id="dev-switch" style="border-color:rgba(76,201,240,0.3)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🌐</span>
+        <div><div class="device-name" style="color:var(--snmp)">Cisco C9300-48</div>
+        <div class="device-val">CPU:<span id="v-switch">38</span>% Ports:<span id="v-ports">46</span>/48</div></div>
+      </div>
+      <div class="device-card" id="dev-ups" style="border-color:rgba(76,201,240,0.2)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🔋</span>
+        <div><div class="device-name" style="color:var(--snmp)">APC Smart-UPS</div>
+        <div class="device-val">Batt:<span id="v-ups">97</span>% Load:<span id="v-load">42</span>%</div></div>
+      </div>
+    </div>
+
+    <!-- ZIGBEE devices -->
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="device-card" id="dev-sensor" style="border-color:rgba(118,196,66,0.3)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🌡️</span>
+        <div><div class="device-name" style="color:var(--zigbee)">Aqara WSDCGQ11LM</div>
+        <div class="device-val">T:<span id="v-sensor">19.8</span>°C H:<span id="v-hum">62</span>% CO2:<span id="v-co2">412</span></div></div>
+      </div>
+      <div class="device-card" id="dev-motion" style="border-color:rgba(118,196,66,0.2)">
+        <div class="device-status online"></div>
+        <span class="device-icon">👁️</span>
+        <div><div class="device-name" style="color:var(--zigbee)">Philips Hue Motion</div>
+        <div class="device-val">Motion:<span id="v-motion">clear</span> Lux:<span id="v-lux">142</span></div></div>
+      </div>
+    </div>
+
+    <!-- CANBUS / BMS devices -->
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="device-card" id="dev-bms" style="border-color:rgba(199,125,255,0.35)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🔋</span>
+        <div><div class="device-name" style="color:var(--canbus)">Orion BMS-2</div>
+        <div class="device-val">SoC:<span id="v-soc">87</span>% V:<span id="v-bmsv">48.6</span>V I:<span id="v-bmsi">-12.4</span>A</div></div>
+      </div>
+      <div class="device-card" id="dev-cell" style="border-color:rgba(199,125,255,0.25)">
+        <div class="device-status online"></div>
+        <span class="device-icon">⚗️</span>
+        <div><div class="device-name" style="color:var(--canbus)">Cell Monitor x16</div>
+        <div class="device-val">CellMin:<span id="v-cmin">3.18</span>V Max:<span id="v-cmax">3.24</span>V Tmp:<span id="v-btmp">31</span>°C</div></div>
+      </div>
+      <div class="device-card" id="dev-inv" style="border-color:rgba(199,125,255,0.2)">
+        <div class="device-status online"></div>
+        <span class="device-icon">🔌</span>
+        <div><div class="device-name" style="color:var(--canbus)">SMA Inverter</div>
+        <div class="device-val">Pout:<span id="v-pout">4.2</span>kW Eff:<span id="v-eff">97.1</span>%</div></div>
+      </div>
+    </div>
+  </div><!-- /col-devices -->
+
+  <!-- ═══════ COL 2: BRIDGE SERVICES ═══════ -->
+  <div class="col col-bridges" id="col-bridges">
+    <div class="col-label">BRIDGE SERVICES</div>
+
+    <div class="proto-card" id="p-modbus" onclick="openArchModal('modbus')" title="Click to view Node.js architecture" style="cursor:pointer;border-color:rgba(255,107,53,.32);background:rgba(255,107,53,.04)">
+      <div class="proto-header" style="background:rgba(255,107,53,.1);color:var(--modbus)">
+        <span>🔌</span>
+        <div>
+          <div>Modbus Bridge</div>
+          <div style="font-size:7px;opacity:.55;font-family:'Rajdhani'">TCP :502 / RTU /dev/ttyUSB0</div>
+        </div>
+        <span class="proto-rate">250ms poll</span>
+      </div>
+      <div class="proto-body">
+        Polls FC03 holding registers, FC01 coils<br>Maps slave IDs → JSON topics<br>
+        <span class="proto-tag" style="background:rgba(255,107,53,.18);color:var(--modbus)">FC01/03/04/06/16</span>
+        <span class="proto-tag" style="background:rgba(255,107,53,.1);color:rgba(255,107,53,.6);margin-left:3px">Slave 1–247</span>
+        <div class="enc-row"><span class="enc-badge enc-no">&#x1F513; TCP:502 plaintext</span><span class="enc-badge enc-no">&#x1F513; RTU: no encryption</span><span class="enc-badge enc-opt">&#x26A1; Tunnel via TLS</span></div>
+      </div>
+    </div>
+
+    <div class="proto-card" id="p-bacnet" onclick="openArchModal('bacnet')" title="Click to view Node.js architecture" style="cursor:pointer;border-color:rgba(249,199,79,.32);background:rgba(249,199,79,.04)">
+      <div class="proto-header" style="background:rgba(249,199,79,.09);color:var(--bacnet)">
+        <span>🏢</span>
+        <div>
+          <div>BACnet Bridge</div>
+          <div style="font-size:7px;opacity:.55;font-family:'Rajdhani'">IP :47808 UDP / MS/TP</div>
+        </div>
+        <span class="proto-rate">COV sub</span>
+      </div>
+      <div class="proto-body">
+        COV subscriptions + periodic ReadProperty<br>Exposes AI/AO/BI/BO/AV object types<br>
+        <span class="proto-tag" style="background:rgba(249,199,79,.14);color:var(--bacnet)">ReadProperty/Multiple</span>
+        <span class="proto-tag" style="background:rgba(249,199,79,.08);color:rgba(249,199,79,.6);margin-left:3px">COV notify</span>
+        <div class="enc-row"><span class="enc-badge enc-no">&#x1F513; BACnet/IP plaintext</span><span class="enc-badge enc-opt">&#x26A0; BACnet/SC TLS 1.3</span><span class="enc-badge enc-partial">&#x25D1; SC optional ASHRAE</span></div>
+      </div>
+    </div>
+
+    <div class="proto-card" id="p-snmp" onclick="openArchModal('snmp')" title="Click to view Node.js architecture" style="cursor:pointer;border-color:rgba(76,201,240,.32);background:rgba(76,201,240,.04)">
+      <div class="proto-header" style="background:rgba(76,201,240,.09);color:var(--snmp)">
+        <span>📡</span>
+        <div>
+          <div>SNMP Bridge</div>
+          <div style="font-size:7px;opacity:.55;font-family:'Rajdhani'">UDP :161 GET / :162 TRAP</div>
+        </div>
+        <span class="proto-rate">30s poll</span>
+      </div>
+      <div class="proto-body">
+        Walks MIB-II + enterprise OID trees<br>Async trap receiver → JSON normalizer<br>
+        <span class="proto-tag" style="background:rgba(76,201,240,.14);color:var(--snmp)">GET/GETNEXT/TRAP/v3</span>
+        <span class="proto-tag" style="background:rgba(76,201,240,.08);color:rgba(76,201,240,.6);margin-left:3px">AES-256</span>
+        <div class="enc-row"><span class="enc-badge enc-no">&#x1F513; v1/v2c plaintext</span><span class="enc-badge enc-yes">&#x1F512; v3 AES-256+SHA-224</span><span class="enc-badge enc-yes">&#x1F512; v3 USM auth</span></div>
+      </div>
+    </div>
+
+    <div class="proto-card" id="p-zigbee" onclick="openArchModal('zigbee')" title="Click to view Node.js architecture" style="cursor:pointer;border-color:rgba(118,196,66,.32);background:rgba(118,196,66,.04)">
+      <div class="proto-header" style="background:rgba(118,196,66,.09);color:var(--zigbee)">
+        <span>📶</span>
+        <div>
+          <div>Zigbee Bridge</div>
+          <div style="font-size:7px;opacity:.55;font-family:'Rajdhani'">IEEE 802.15.4 · 2.4GHz · PAN</div>
+        </div>
+        <span class="proto-rate">async</span>
+      </div>
+      <div class="proto-body">
+        zigbee2mqtt coordinator, decodes ZCL clusters<br>Mesh routing, LQI/RSSI monitoring<br>
+        <span class="proto-tag" style="background:rgba(118,196,66,.14);color:var(--zigbee)">ZCL · ZHA · ZLL</span>
+        <span class="proto-tag" style="background:rgba(118,196,66,.08);color:rgba(118,196,66,.6);margin-left:3px">AES-128</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; AES-128 MAC layer</span><span class="enc-badge enc-yes">&#x1F512; NWK + APS keys</span><span class="enc-badge enc-partial">&#x25D1; no end-to-end payload</span></div>
+      </div>
+    </div>
+
+    <div class="proto-card" id="p-canbus" onclick="openArchModal('canbus')" title="Click to view Node.js architecture" style="cursor:pointer;border-color:rgba(199,125,255,.32);background:rgba(199,125,255,.04)">
+      <div class="proto-header" style="background:rgba(199,125,255,.09);color:var(--canbus)">
+        <span>🚌</span>
+        <div>
+          <div>CANbus / BMS Bridge</div>
+          <div style="font-size:7px;opacity:.55;font-family:'Rajdhani'">CAN 2.0B 500kbit · SocketCAN</div>
+        </div>
+        <span class="proto-rate">10ms</span>
+      </div>
+      <div class="proto-body">
+        SocketCAN vcan0, DBC decode, J1939 PGNs<br>BMS SoC, cell voltages, pack current, faults<br>
+        <span class="proto-tag" style="background:rgba(199,125,255,.14);color:var(--canbus)">DBC · J1939 · CANopen</span>
+        <span class="proto-tag" style="background:rgba(199,125,255,.08);color:rgba(199,125,255,.6);margin-left:3px">CRC+ACK</span>
+        <div class="enc-row"><span class="enc-badge enc-no">&#x1F513; CAN 2.0: no encryption</span><span class="enc-badge enc-opt">&#x26A0; CAN FD: optional ext</span><span class="enc-badge enc-opt">&#x26A1; Physical isolation</span></div>
+      </div>
+    </div>
+  </div><!-- /col-bridges -->
+
+  <!-- ═══════ COL 3: MQTT BROKER ═══════ -->
+  <div class="col-center" id="col-mqtt">
+    <div class="col-label">MQTT BROKER</div>
+    <div class="mqtt-broker" id="mqtt-broker" onclick="openBrokerModal()" title="Click to view broker architecture">
+      <div class="broker-icon">⚡</div>
+      <div class="broker-title">MQTT</div>
+      <div class="broker-sub">MOSQUITTO 2.0</div>
+      <div class="mqtt-topics">
+        <div class="mqtt-topic">factory/modbus/+</div>
+        <div class="mqtt-topic">building/bacnet/+</div>
+        <div class="mqtt-topic">network/snmp/+</div>
+        <div class="mqtt-topic">sensors/zigbee/+</div>
+        <div class="mqtt-topic">bms/canbus/+</div>
+      </div>
+      <div class="broker-stats">
+        <span>↑<span id="b-pub">0</span>/s</span>
+        <span>↓<span id="b-sub">5</span> subs</span>
+      </div>
+      <div style="margin-top:4px;font-family:'Share Tech Mono',monospace;font-size:6.5px;color:rgba(0,229,255,0.28)">QoS 0/1/2 · TLS 1.3 · :1883/:8883</div>
+      <div class="broker-hint">▤ CLICK — VIEW ARCHITECTURE</div>
+    </div>
+  </div>
+
+  <!-- ═══════ COL 4: CONSUMERS ═══════ -->
+  <div class="col col-consumers" id="col-consumers">
+    <div class="col-label">SUBSCRIBER SERVICES</div>
+
+    <div class="consumer-card" id="c-influx" style="border-color:rgba(255,214,10,.28);background:rgba(255,214,10,.04)">
+      <div class="consumer-header" style="background:rgba(255,214,10,.07);color:var(--db)"><span>🗄️</span> InfluxDB 2.x</div>
+      <div class="consumer-body">
+        Subscribes all topics, Line Protocol writes<br>Retention: 90d raw / 1y downsample<br>
+        <span class="proto-tag" style="background:rgba(255,214,10,.12);color:var(--db)">telegraf · flux · retention</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; HTTPS :8086 TLS</span><span class="enc-badge enc-yes">&#x1F512; Token auth</span></div>
+      </div>
+    </div>
+
+    <div class="consumer-card" id="c-timescale" style="border-color:rgba(255,214,10,.2);background:rgba(255,214,10,.03)">
+      <div class="consumer-header" style="background:rgba(255,214,10,.06);color:var(--db)"><span>🐘</span> TimescaleDB</div>
+      <div class="consumer-body">
+        PostgreSQL hypertables, continuous aggs<br>Full SQL + geospatial + joins<br>
+        <span class="proto-tag" style="background:rgba(255,214,10,.1);color:var(--db)">hypertable · cagg · SQL</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; SSL/TLS PostgreSQL</span><span class="enc-badge enc-yes">&#x1F512; pg_crypto AES</span></div>
+      </div>
+    </div>
+
+    <div class="consumer-card" id="c-grafana" style="border-color:rgba(86,207,225,.28);background:rgba(86,207,225,.04)">
+      <div class="consumer-header" style="background:rgba(86,207,225,.07);color:var(--fe)"><span>📊</span> Grafana 10</div>
+      <div class="consumer-body">
+        Live panels via MQTT datasource plugin<br>Alert manager → PagerDuty / Slack<br>
+        <span class="proto-tag" style="background:rgba(86,207,225,.12);color:var(--fe)">WS · panels · alerting</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; HTTPS :3000</span><span class="enc-badge enc-yes">&#x1F512; OAuth2 / LDAP</span></div>
+      </div>
+    </div>
+
+    <div class="consumer-card" id="c-webapp" style="border-color:rgba(86,207,225,.2);background:rgba(86,207,225,.03)">
+      <div class="consumer-header" style="background:rgba(86,207,225,.06);color:var(--fe)"><span>🖥️</span> SCADA / Web App</div>
+      <div class="consumer-body">
+        React + MQTT.js WebSocket sub<br>Real-time P&ID, geo-maps, trend charts<br>
+        <span class="proto-tag" style="background:rgba(86,207,225,.1);color:var(--fe)">MQTT.js · WS:9001 · React</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; WSS TLS :9001</span><span class="enc-badge enc-yes">&#x1F512; JWT bearer token</span></div>
+      </div>
+    </div>
+
+    <div class="consumer-card" id="c-rules" style="border-color:rgba(255,159,28,.22);background:rgba(255,159,28,.03)">
+      <div class="consumer-header" style="background:rgba(255,159,28,.06);color:var(--rules)"><span>⚙️</span> Node-RED / AI Engine</div>
+      <div class="consumer-body">
+        Flow automation, threshold alerts, ML infer<br>Publishes commands back to devices<br>
+        <span class="proto-tag" style="background:rgba(255,159,28,.12);color:var(--rules)">Node-RED · n8n · TF-Lite</span>
+        <div class="enc-row"><span class="enc-badge enc-yes">&#x1F512; MQTT TLS :8883</span><span class="enc-badge enc-opt">&#x26A0; Node-RED HTTPS opt</span></div>
+      </div>
+    </div>
+  </div><!-- /col-consumers -->
+
+  <!-- ═══════ COL 5: OUTPUT SYSTEMS ═══════ -->
+  <div class="col col-outputs" id="col-outputs">
+    <div class="col-label">OUTPUT SYSTEMS</div>
+
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="output-card" id="out-dashboard" style="border-color:rgba(255,214,10,.22)">
+        <span style="font-size:13px">📈</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--db)">Live Chart</div>
+        <div style="font-size:7.5px;opacity:.4">kWh/Temp time-series</div></div>
+      </div>
+      <div class="output-card" id="out-alert" style="border-color:rgba(255,214,10,.16)">
+        <span style="font-size:13px">🔔</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--db)">Alert Engine</div>
+        <div style="font-size:7.5px;opacity:.4">PagerDuty · Slack</div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="output-card" id="out-sql" style="border-color:rgba(255,214,10,.16)">
+        <span style="font-size:13px">🔍</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--db)">SQL Reports</div>
+        <div style="font-size:7.5px;opacity:.4">Historical analytics</div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="output-card" id="out-map" style="border-color:rgba(86,207,225,.22)">
+        <span style="font-size:13px">🗺️</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--fe)">Geo Live Map</div>
+        <div style="font-size:7.5px;opacity:.4">Device topology</div></div>
+      </div>
+      <div class="output-card" id="out-mobile" style="border-color:rgba(86,207,225,.16)">
+        <span style="font-size:13px">📱</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--fe)">Mobile App</div>
+        <div style="font-size:7.5px;opacity:.4">FCM push notifs</div></div>
+      </div>
+      <div class="output-card" id="out-scada" style="border-color:rgba(86,207,225,.14)">
+        <span style="font-size:13px">🖥️</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--fe)">SCADA P&amp;ID</div>
+        <div style="font-size:7.5px;opacity:.4">Real-time diagram</div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="output-card" id="out-action" style="border-color:rgba(255,159,28,.26)">
+        <span style="font-size:13px">🤖</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--rules)">Automation</div>
+        <div style="font-size:7.5px;opacity:.4">Email/Webhook/CMD</div></div>
+      </div>
+      <div class="output-card" id="out-ml" style="border-color:rgba(255,159,28,.16)">
+        <span style="font-size:13px">🧠</span>
+        <div><div style="font-family:'Share Tech Mono',monospace;font-size:8.5px;color:var(--rules)">ML Anomaly</div>
+        <div style="font-size:7.5px;opacity:.4">TF-Lite inference</div></div>
+      </div>
+    </div>
+  </div><!-- /col-outputs -->
+
+</div><!-- /arch -->
+    </div><!-- /arch-wrap -->
+  </div><!-- /sim-canvas -->
+
+  <!-- Zoom controls -->
+  <div class="zoom-controls">
+    <button class="zoom-btn" onclick="zoomIn()" title="Zoom In (scroll up)">＋</button>
+    <div class="zoom-label" id="zoomLabel">100%</div>
+    <button class="zoom-btn" onclick="zoomOut()" title="Zoom Out (scroll down)">－</button>
+    <div class="zoom-divider"></div>
+    <button class="zoom-btn" onclick="zoomReset()" title="Reset view" style="font-size:11px">⌂</button>
+  </div>
+
+  <!-- Minimap -->
+  <div class="minimap" id="minimap" title="Overview minimap">
+    <canvas id="minimapCanvas"></canvas>
+    <div class="minimap-vp-indicator" id="minimapVP"></div>
+    <div class="minimap-label">OVERVIEW</div>
+  </div>
+
+  <!-- Pan hint (fades out) -->
+  <div class="pan-hint" id="panHint">🖱 SCROLL TO ZOOM · DRAG TO PAN</div>
+</div><!-- /sim-viewport -->
+
+<!-- WHY SECTION -->
+<div class="why-section">
+  <div class="why-title">// WHY THIS ARCHITECTURE WINS</div>
+  <div class="compare">
+    <div class="compare-box bad">
+      <h3>❌ WITHOUT MQTT HUB</h3>
+      <ul>
+        <li>25 point-to-point integrations (5 protocols × 5 consumers)</li>
+        <li>Every app must parse Modbus, BACnet, SNMP, Zigbee, CAN frames</li>
+        <li>Protocol change breaks every consumer simultaneously</li>
+        <li>No central audit — data lost on consumer crash</li>
+        <li>Industrial binary protocols not internet/cloud friendly</li>
+        <li>Scaling requires rewiring entire mesh of connections</li>
+      </ul>
+    </div>
+    <div class="compare-box good">
+      <h3>✅ WITH MQTT AS DATA BUS</h3>
+      <ul>
+        <li>Only 5 bridges — consumers just subscribe to clean JSON topics</li>
+        <li>Add new consumers with zero knowledge of underlying protocols</li>
+        <li>Each bridge is an isolated, replaceable Docker microservice</li>
+        <li>QoS 1/2 guarantees no data loss on reconnect + persistent sessions</li>
+        <li>Runs over WebSocket port 9001 — browser and cloud native</li>
+        <li>Topic wildcards allow fine-grained pub/sub filtering</li>
+      </ul>
+    </div>
+  </div>
+  <div class="why-grid">
+    <div class="why-card"><h3>🔌 Protocol Isolation</h3><p>Each bridge knows only one protocol. Consumer failures never affect field data collection.</p></div>
+    <div class="why-card"><h3>📨 Pub/Sub Decoupling</h3><p>Publishers and subscribers are fully independent. Add InfluxDB without touching a single bridge.</p></div>
+    <div class="why-card"><h3>🔁 QoS Guarantee</h3><p>MQTT QoS 0/1/2 ensures messages survive network drops. Persistent sessions buffer data while consumers reconnect.</p></div>
+    <div class="why-card"><h3>⚡ 2-byte Overhead</h3><p>Minimal fixed header — ideal for embedded systems and high-frequency BMS/sensor telemetry at scale.</p></div>
+    <div class="why-card"><h3>🌐 Universal Transport</h3><p>TCP:1883 + TLS:8883 + WebSocket:9001. Browsers, mobile apps, and cloud services all connect natively.</p></div>
+    <div class="why-card"><h3>🏗️ Microservice Ready</h3><p>Each bridge is a Docker container. Scale, update, or swap any bridge independently with zero consumer downtime.</p></div>
+  </div>
+</div>
+
+</div><!-- /scene -->
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════
+let PAUSED = false;
+let SPEED = 1;
+let PKT_COUNT = 0;
+const ACTIVE_TIMERS = [];
+const PKT_LOG = []; // rolling log of last 80 packets
+
+// ════════════════════════════════════════════════════════════
+//  CONTROLS
+// ════════════════════════════════════════════════════════════
+function togglePause() {
+  PAUSED = !PAUSED;
+  const btn = document.getElementById('pauseBtn');
+  btn.textContent = PAUSED ? '▶ RESUME' : '⏸ PAUSE';
+  btn.classList.toggle('paused', PAUSED);
+}
+function setSpeed(v) { SPEED = parseFloat(v); }
+
+
+// ════════════════════════════════════════════════════════════
+//  ZOOM / PAN  (scroll · drag · pinch · keyboard)
+// ════════════════════════════════════════════════════════════
+let zoomLevel  = 1;
+let panX = 0, panY = 0;
+const ZOOM_MIN = 0.25, ZOOM_MAX = 3.0, ZOOM_STEP = 0.1;
+let isPanning = false, panSX = 0, panSY = 0, panOX = 0, panOY = 0;
+
+function applyTransform(skipLines) {
+  const canvas = document.getElementById('simCanvas');
+  if (canvas) canvas.style.transform = `translate(${panX}px,${panY}px) scale(${zoomLevel})`;
+  const lbl = document.getElementById('zoomLabel');
+  if (lbl) lbl.textContent = Math.round(zoomLevel * 100) + '%';
+  updateMinimap();
+  if (!skipLines) requestAnimationFrame(drawLines);
+}
+
+function zoomIn()    { zoomLevel = Math.min(ZOOM_MAX, +(zoomLevel + ZOOM_STEP).toFixed(2)); applyTransform(); }
+function zoomOut()   { zoomLevel = Math.max(ZOOM_MIN, +(zoomLevel - ZOOM_STEP).toFixed(2)); applyTransform(); }
+function zoomReset() { zoomLevel = 1; panX = 0; panY = 0; applyTransform(); }
+function zoomTo(lvl, cx, cy) {
+  const prev = zoomLevel;
+  zoomLevel = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(lvl).toFixed(2)));
+  panX = cx - (cx - panX) * (zoomLevel / prev);
+  panY = cy - (cy - panY) * (zoomLevel / prev);
+  applyTransform();
+}
+
+// ── Minimap ──
+function updateMinimap() {
+  const vp   = document.getElementById('simViewport');
+  const cvs  = document.getElementById('simCanvas');
+  const mmC  = document.getElementById('minimapCanvas');
+  const mmVP = document.getElementById('minimapVP');
+  if (!vp || !cvs || !mmC || !mmVP) return;
+
+  const mmW = 130, mmH = 80;
+  mmC.width = mmW; mmC.height = mmH;
+  const ctx = mmC.getContext('2d');
+  ctx.clearRect(0,0,mmW,mmH);
+
+  // Compute canvas natural (unscaled) bounds
+  const cw = cvs.scrollWidth;
+  const ch = cvs.scrollHeight;
+  const scX = mmW / cw, scY = mmH / ch;
+
+  // Draw column region blocks as simple rectangles
+  const colPairs = [
+    {x:0,   w:0.18, col:'rgba(255,107,53,0.25)'},
+    {x:0.18,w:0.17, col:'rgba(249,199,79,0.2)'},
+    {x:0.35,w:0.12, col:'rgba(0,229,255,0.25)'},
+    {x:0.47,w:0.17, col:'rgba(255,214,10,0.2)'},
+    {x:0.64,w:0.18, col:'rgba(86,207,225,0.2)'},
+  ];
+  colPairs.forEach(({x,w,col}) => {
+    ctx.fillStyle = col;
+    ctx.fillRect(x*mmW, 2, w*mmW-2, mmH-4);
+  });
+
+  // Viewport indicator — where is the visible area in canvas coords?
+  const vpW = vp.clientWidth  / zoomLevel;
+  const vpH = vp.clientHeight / zoomLevel;
+  const ox  = -panX / zoomLevel;
+  const oy  = -panY / zoomLevel;
+
+  const iX = Math.max(0, ox * scX);
+  const iY = Math.max(0, oy * scY);
+  const iW = Math.min(mmW - iX, vpW * scX);
+  const iH = Math.min(mmH - iY, vpH * scY);
+
+  mmVP.style.left   = iX + 'px';
+  mmVP.style.top    = iY + 'px';
+  mmVP.style.width  = Math.max(8, iW) + 'px';
+  mmVP.style.height = Math.max(6, iH) + 'px';
+}
+
+// ── Event wiring (runs once on load) ──
+(function initZoomPan() {
+  const vp = document.getElementById('simViewport');
+  if (!vp) { setTimeout(initZoomPan, 200); return; }
+
+  // Scroll wheel → zoom centred on cursor
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+    zoomTo(zoomLevel + delta, cx, cy);
+  }, { passive: false });
+
+  // Mouse drag → pan
+  vp.addEventListener('mousedown', e => {
+    const blocked = e.target.closest(
+      '.pkt-dot,.zoom-btn,.minimap,.mqtt-broker,.proto-card,' +
+      '.tracer-overlay,.arch-modal-overlay,.broker-overlay,.btn-pause,.btn-theme'
+    );
+    if (blocked || e.button !== 0) return;
+    isPanning = true;
+    panSX = e.clientX; panSY = e.clientY;
+    panOX = panX;      panOY = panY;
+    vp.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    panX = panOX + (e.clientX - panSX);
+    panY = panOY + (e.clientY - panSY);
+    applyTransform(true); // skipLines during drag for perf
+  });
+  window.addEventListener('mouseup', () => {
+    if (isPanning) { isPanning = false; vp.classList.remove('grabbing'); drawLines(); }
+  });
+
+  // Touch: single-finger pan, two-finger pinch-zoom
+  let t0 = null, tPanX = 0, tPanY = 0, tDist = 0;
+  vp.addEventListener('touchstart', e => {
+    const ts = e.touches;
+    if (ts.length === 1) {
+      t0 = ts[0]; tPanX = panX; tPanY = panY;
+    } else if (ts.length === 2) {
+      tDist = Math.hypot(ts[0].clientX-ts[1].clientX, ts[0].clientY-ts[1].clientY);
+    }
+  }, { passive: true });
+  vp.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const ts = e.touches;
+    if (ts.length === 1 && t0) {
+      panX = tPanX + (ts[0].clientX - t0.clientX);
+      panY = tPanY + (ts[0].clientY - t0.clientY);
+      applyTransform(true);
+    } else if (ts.length === 2) {
+      const d = Math.hypot(ts[0].clientX-ts[1].clientX, ts[0].clientY-ts[1].clientY);
+      const rect = vp.getBoundingClientRect();
+      const cx = ((ts[0].clientX + ts[1].clientX)/2) - rect.left;
+      const cy = ((ts[0].clientY + ts[1].clientY)/2) - rect.top;
+      const newZ = zoomLevel * (d / tDist);
+      tDist = d;
+      zoomTo(newZ, cx, cy);
+    }
+  }, { passive: false });
+  vp.addEventListener('touchend', () => { t0 = null; drawLines(); });
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', e => {
+    if (document.activeElement.tagName === 'INPUT') return;
+    if (e.key === '=' || e.key === '+') zoomIn();
+    if (e.key === '-') zoomOut();
+    if (e.key === '0') zoomReset();
+    if (e.key === 'ArrowLeft')  { panX += 40; applyTransform(); }
+    if (e.key === 'ArrowRight') { panX -= 40; applyTransform(); }
+    if (e.key === 'ArrowUp')    { panY += 40; applyTransform(); }
+    if (e.key === 'ArrowDown')  { panY -= 40; applyTransform(); }
+  });
+
+  // Fade out the pan hint
+  setTimeout(() => {
+    const h = document.getElementById('panHint');
+    if (h) h.style.display = 'none';
+  }, 4200);
+})();
+
+// ════════════════════════════════════════════════════════════
+//  CLEAN ARCHITECTURE DATA  (Node.js — flow/structure only)
+// ════════════════════════════════════════════════════════════
+const ARCH_DATA = {
+
+  // ─────────────────────────────────────────────────────────
+  broker: {
+    title: '⚡ MQTT BROKER — Node.js Clean Architecture',
+    badge: 'Aedes / Custom · Mosquitto Mgmt',
+    color: '#00e5ff',
+    flowChain: [
+      'Client Connect','TLS Handshake :8883','Auth Middleware',
+      'ACL Guard','Message Router','QoS Engine','Subscriber Dispatch','Persist / Forward'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#4cc9f0',
+        role: 'Accepts raw connections, terminates TLS, upgrades WebSocket',
+        boxes: [
+          { icon:'🔌', title:'TCP Listener :1883',  sub:'Plain socket — internal only\nBind 127.0.0.1, no ext exposure', tags:['net.createServer','EventEmitter'] },
+          { icon:'🔒', title:'TLS Listener :8883',  sub:'TLS 1.3 termination\nmTLS mutual cert auth\nSNI multi-domain', tags:['tls.createServer','mTLS','SNI'] },
+          { icon:'🌐', title:'WebSocket :9001/9002', sub:'HTTP→WS upgrade handler\nWSS for browser clients\nPing/pong keep-alive', tags:['ws','upgrade','WSS'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#f9c74f',
+        role: 'Parses MQTT wire format · enforces auth & topic ACLs',
+        boxes: [
+          { icon:'📦', title:'MQTT Packet Parser',  sub:'Fixed + variable header\nTopic + payload decode\nPacket type dispatch', tags:['mqtt-packet','Buffer','Streams'] },
+          { icon:'🔐', title:'Auth Adapter',        sub:'Pluggable auth chain\nbcrypt password check\nJWT token verify', tags:['bcrypt','jsonwebtoken','plugin'] },
+          { icon:'📋', title:'ACL Rule Engine',     sub:'Topic ACL read/write/deny\nPer-clientId scope\nWildcard pattern match', tags:['pattern-match','RBAC','ACL'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'Core MQTT operation handlers — publish, subscribe, session lifecycle',
+        boxes: [
+          { icon:'📨', title:'PUBLISH Handler',     sub:'QoS 0/1/2 state machine\nDup detection & dedup\nRetained message index', tags:['QoS FSM','PUBACK','PUBREL'] },
+          { icon:'📬', title:'SUBSCRIBE Handler',   sub:'Topic wildcard match\n# and + resolution\nFan-out to all matched subs', tags:['trie','wildcard','fan-out'] },
+          { icon:'🔄', title:'Session Manager',     sub:'Persistent session store\nWill message queue\nOffline msg buffering', tags:['cleanSession','Will','offline'] },
+        ]
+      },
+      {
+        name: 'Domain / Routing Core', color: '#76c442',
+        role: 'Message routing trie · broker telemetry · multi-broker bridging',
+        boxes: [
+          { icon:'📡', title:'Message Router',      sub:'In-memory routing trie\nO(n) topic matching\nRetained message store', tags:['Trie','O(n)','retain'] },
+          { icon:'📊', title:'$SYS Publisher',      sub:'Broker stats via topics\nConnected clients, msg/s\nUptime + subscriptions', tags:['$SYS/#','metrics','setInterval'] },
+          { icon:'🌉', title:'Bridge Manager',      sub:'Broker-to-broker forward\nCloud MQTT bridge out\nTopic re-map rules', tags:['bridge','AWS IoT','Azure IoT'] },
+        ]
+      },
+      {
+        name: 'Infrastructure / Persistence', color: '#c77dff',
+        role: 'Durable storage · observability · audit logging',
+        boxes: [
+          { icon:'💾', title:'Session Store',       sub:'LevelDB or Redis backend\nQoS 1/2 queue durable\nSession state persist', tags:['LevelDB','Redis','durable'] },
+          { icon:'📈', title:'Metrics Exporter',    sub:'Prometheus /metrics route\nGrafana scrape target\nMsg + client counters', tags:['prom-client','Prometheus','Grafana'] },
+          { icon:'📝', title:'Audit Logger',        sub:'Structured JSON logs\nClient connect/disconnect\nACL violations → SIEM', tags:['winston','JSON','SIEM'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'aedes',          desc:'Lightweight MQTT broker built on Node.js streams' },
+      { name:'mqtt-packet',    desc:'MQTT packet encoder/decoder for custom broker' },
+      { name:'ioredis / level',desc:'Session + QoS queue persistent store backends' },
+      { name:'prom-client',    desc:'Prometheus metrics, scrape /metrics endpoint' },
+      { name:'winston',        desc:'Structured JSON logging, multiple transports' },
+      { name:'ws',             desc:'WebSocket server, HTTP upgrade to MQTT-over-WS' },
+    ],
+    docker: {
+      service: 'mqtt-broker',
+      ports: ['8883:8883','9002:9002'],
+      volumes: ['./certs:/certs','./data:/data','./config:/config'],
+      env: ['NODE_ENV=production','REDIS_URL=redis://redis:6379']
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  modbus: {
+    title: '🔌 MODBUS BRIDGE — Node.js Clean Architecture',
+    badge: 'Modbus TCP / RTU → MQTT Publisher',
+    color: '#ff6b35',
+    flowChain: [
+      'PLC / Meter','TCP:502 or RTU serial','Driver Adapter',
+      'Register Reader','Payload Mapper','Change Detector','MQTT Publisher','Command Writer'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#ff6b35',
+        role: 'Physical connection to Modbus devices · MQTT TLS client',
+        boxes: [
+          { icon:'🔌', title:'Modbus TCP Client',   sub:'TCP socket to slave :502\nTransaction ID tracking\nRequest queue pipeline', tags:['modbus-serial','TCP','queue'] },
+          { icon:'📻', title:'Modbus RTU Client',   sub:'SerialPort /dev/ttyUSB0\n19200-115200 baud\nRTU framing + CRC16', tags:['serialport','RTU','CRC16'] },
+          { icon:'🔒', title:'MQTT TLS Client',     sub:'MQTT.js broker :8883\nmTLS client certificate\nAuto-reconnect backoff', tags:['mqtt.js','TLS','reconnect'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#f9c74f',
+        role: 'Translates Modbus function codes to structured data objects',
+        boxes: [
+          { icon:'📖', title:'Register Reader',     sub:'FC03 holding registers\nFC04 input registers\nFC01/02 coil & discrete', tags:['FC03','FC04','FC01'] },
+          { icon:'✏️', title:'Register Writer',     sub:'FC06 single write\nFC16 multiple write\nFC05 coil set', tags:['FC06','FC16','FC05'] },
+          { icon:'🗂️', title:'Device Registry',    sub:'Slave ID → friendly name\nRegister address map\nScale + unit definitions', tags:['config.yaml','slave-map','unit'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'Poll scheduling · command routing · data pipeline orchestration',
+        boxes: [
+          { icon:'⏱️', title:'Poll Scheduler',      sub:'setInterval per slave\nConfigurable intervals\nError back-off logic', tags:['setInterval','back-off','retry'] },
+          { icon:'🗺️', title:'Register Mapper',     sub:'Raw uint16 → typed value\nScale factor × offset\nEnum decode (e.g. status)', tags:['mapper','scale','offset'] },
+          { icon:'📤', title:'Command Handler',      sub:'Subscribe cmd/modbus/#\nParse & validate JSON\nDispatch to writer', tags:['SUBSCRIBE','validate','dispatch'] },
+        ]
+      },
+      {
+        name: 'Domain / Core', color: '#76c442',
+        role: 'Data quality · change detection · MQTT publish logic',
+        boxes: [
+          { icon:'⚙️', title:'Data Normalizer',     sub:'Convert raw to SI units\nApply deadband filter\nISO-8601 timestamp', tags:['SI units','deadband','ISO-8601'] },
+          { icon:'🔍', title:'Change Detector',     sub:'Compare to prev value\nPublish only on delta\nConfigurable tolerance', tags:['delta','COV','tolerance'] },
+          { icon:'📡', title:'MQTT Publisher',       sub:'PUBLISH factory/modbus/#\nQoS 1 + PUBACK wait\nRetain flag per topic', tags:['PUBLISH','QoS1','retain'] },
+        ]
+      },
+      {
+        name: 'Infrastructure', color: '#c77dff',
+        role: 'Config loading · structured logging · health endpoint',
+        boxes: [
+          { icon:'🗃️', title:'Config Loader',       sub:'config.yaml + env vars\nSlave IDs & register map\nMQTT URL + cert paths', tags:['dotenv','js-yaml','config'] },
+          { icon:'📝', title:'Logger',               sub:'Winston JSON logger\ndebug/info/warn/error\nFile + console output', tags:['winston','JSON','log-rotate'] },
+          { icon:'❤️', title:'Health Check',         sub:'HTTP GET /health route\nMQTT + Modbus status\nDocker healthcheck', tags:['express','/health','Docker'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'modbus-serial',  desc:'Modbus TCP, RTU, ASCII — full FC support' },
+      { name:'serialport',     desc:'Serial port access for RTU over /dev/ttyUSB0' },
+      { name:'mqtt.js',        desc:'MQTT client, TLS, QoS 0/1/2, auto-reconnect' },
+      { name:'js-yaml',        desc:'YAML config loader for slave + register maps' },
+      { name:'winston',        desc:'Structured JSON logging with log-rotation' },
+      { name:'express',        desc:'HTTP /health and /metrics endpoint server' },
+    ],
+    docker: {
+      service: 'modbus-bridge',
+      ports: [],
+      volumes: ['./config:/app/config','./certs:/app/certs'],
+      env: ['NODE_ENV=production','MQTT_URL=mqtts://broker:8883']
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  bacnet: {
+    title: '🏢 BACNET BRIDGE — Node.js Clean Architecture',
+    badge: 'BACnet/IP · BACnet/SC → MQTT Publisher',
+    color: '#f9c74f',
+    flowChain: [
+      'BACnet Device','UDP:47808','WhoIs Discovery',
+      'COV Subscribe / Poll','Object Reader','Data Normalizer','MQTT Publisher','WriteProperty CMD'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#f9c74f',
+        role: 'BACnet/IP UDP socket · device discovery · MQTT TLS client',
+        boxes: [
+          { icon:'📡', title:'BACnet/IP Stack',     sub:'UDP socket :47808\nBVLL + NPDU + APDU layers\nOriginal-Unicast routing', tags:['node-bacnet','UDP','APDU'] },
+          { icon:'🔍', title:'Device Discovery',    sub:'WhoIs broadcast scan\nIAm response handler\nDevice object catalogue', tags:['WhoIs','IAm','discover'] },
+          { icon:'🔒', title:'MQTT TLS Client',     sub:'MQTT.js broker :8883\nmTLS PEM cert + key\nPersistent session', tags:['mqtt.js','TLS 1.3','PEM'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#ff6b35',
+        role: 'BACnet service calls — read, COV subscribe, write',
+        boxes: [
+          { icon:'📖', title:'ReadProperty Client', sub:'AI/AO/BI/BO/AV objects\nReadPropertyMultiple batch\nAPDU confirmed service', tags:['ReadProperty','RPM','confirmed'] },
+          { icon:'🔔', title:'COV Subscriber',      sub:'SubscribeCOV per object\nCOV increment config\nLifetime renewal timer', tags:['SubscribeCOV','COV-inc','lifetime'] },
+          { icon:'✏️', title:'WriteProperty Client',sub:'ConfirmedWriteProperty\nPriority 8 (manual op)\nInvoke ID tracking', tags:['WriteProperty','priority:8','invoke-id'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'Poll scheduling · command routing · object→topic mapping',
+        boxes: [
+          { icon:'⏱️', title:'Poll Scheduler',      sub:'ReadPropertyMultiple\nConfigurable per device\nFallback if COV fails', tags:['RPM','setInterval','fallback'] },
+          { icon:'🗺️', title:'Object Mapper',       sub:'BACnet obj → MQTT topic\nAI:1 → building/bacnet/\nUnit enum → SI string', tags:['obj-map','topic-path','SI'] },
+          { icon:'📤', title:'Command Handler',      sub:'Subscribe cmd/bacnet/#\nValidate object + value\nDispatch WriteProperty', tags:['SUBSCRIBE','validate','dispatch'] },
+        ]
+      },
+      {
+        name: 'Domain / Core', color: '#76c442',
+        role: 'Data quality · status check · change-on-value logic',
+        boxes: [
+          { icon:'⚙️', title:'Data Normalizer',     sub:'BACnet units → SI\nReliability status check\nOutOfService flag handle', tags:['units','reliability','SI'] },
+          { icon:'🔍', title:'Change Detector',     sub:'COV + deadband merge\nPublish on Δ only\nPresent-Value + flags', tags:['COV','deadband','status'] },
+          { icon:'📡', title:'MQTT Publisher',       sub:'PUBLISH building/bacnet/#\nQoS 1, structured JSON\nDevice meta in payload', tags:['PUBLISH','JSON','meta'] },
+        ]
+      },
+      {
+        name: 'Infrastructure', color: '#c77dff',
+        role: 'Config · logging · health endpoint',
+        boxes: [
+          { icon:'🗃️', title:'Config Loader',       sub:'Device IP + instance ID\nObject list per device\nMQTT broker + cert path', tags:['config.yaml','instance','dotenv'] },
+          { icon:'📝', title:'Logger',               sub:'APDU frame trace log\nBACnet error codes\nWinston JSON output', tags:['winston','APDU-trace','error'] },
+          { icon:'❤️', title:'Health Check',         sub:'HTTP /health route\nBACnet device reachable\nMQTT connected check', tags:['express','/health','ping'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'node-bacnet',    desc:'Full BACnet/IP stack — WhoIs, ReadProperty, COV, Write' },
+      { name:'mqtt.js',        desc:'MQTT TLS client, QoS 0/1/2, persistent session' },
+      { name:'node-cron',      desc:'Cron-based poll scheduler per device/object' },
+      { name:'js-yaml',        desc:'Device + object map config loader' },
+      { name:'winston',        desc:'Structured APDU and error logging' },
+      { name:'express',        desc:'/health and /ready HTTP status endpoints' },
+    ],
+    docker: {
+      service: 'bacnet-bridge',
+      ports: [],
+      volumes: ['./config:/app/config','./certs:/app/certs'],
+      env: ['NODE_ENV=production','MQTT_URL=mqtts://broker:8883']
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  snmp: {
+    title: '📡 SNMP BRIDGE — Node.js Clean Architecture',
+    badge: 'SNMPv1 / v2c / v3 → MQTT Publisher',
+    color: '#4cc9f0',
+    flowChain: [
+      'Network Device','UDP:161 GET / :162 TRAP','SNMPv3 Session',
+      'OID Walker / MIB','Trap Receiver','Data Normalizer','MQTT Publisher','SNMP SET CMD'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#4cc9f0',
+        role: 'SNMP UDP sessions · trap listener · MQTT TLS client',
+        boxes: [
+          { icon:'📡', title:'SNMP GET Session',    sub:'net-snmp UDP :161\nv2c community string\nv3 USM auth + priv', tags:['net-snmp','UDP:161','USM'] },
+          { icon:'🪤', title:'TRAP Receiver :162',  sub:'SNMP trap listener\nAsync trap → EventEmitter\nv2c Inform support', tags:['trap','Inform','EventEmitter'] },
+          { icon:'🔒', title:'SNMPv3 Security',     sub:'authProtocol: SHA-224\nprivProtocol: AES-256\nContext + engine ID', tags:['SHA-224','AES-256','USM'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#f9c74f',
+        role: 'MIB walk · OID resolution · SNMP SET operations',
+        boxes: [
+          { icon:'🚶', title:'MIB Walker',           sub:'GetNext / GetBulk\nMIB-II subtree walk\nEnterprise OID support', tags:['GetBulk','MIB-II','walk'] },
+          { icon:'📖', title:'OID Resolver',         sub:'OID number → name\nLoaded .mib files\nCustom enterprise MIBs', tags:['MIB','OID-name','enterprise'] },
+          { icon:'✏️', title:'SNMP SET Adapter',    sub:'v3 authenticated SET\nOID + value + ASN type\nError status handling', tags:['SET','v3 auth','ASN.1'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'Poll scheduling · command routing · OID→topic mapping',
+        boxes: [
+          { icon:'⏱️', title:'Poll Scheduler',      sub:'Per-device intervals\nBulk query batching\nTimeout + retry logic', tags:['setInterval','batch','retry'] },
+          { icon:'🗺️', title:'OID Mapper',           sub:'OID → MQTT topic path\nData type conversion\nIndex → device name', tags:['oid-map','type-cast','index'] },
+          { icon:'📤', title:'Command Handler',      sub:'Subscribe cmd/snmp/#\nParse SNMP SET action\nValidate OID + value', tags:['SUBSCRIBE','SET','validate'] },
+        ]
+      },
+      {
+        name: 'Domain / Core', color: '#76c442',
+        role: 'Counter rate calc · trap dispatch · change detection',
+        boxes: [
+          { icon:'⚙️', title:'Data Normalizer',     sub:'Counter32 Δ → rate/s\nGauge32 → percentage\nOctetString ASCII decode', tags:['rate','gauge','OctetString'] },
+          { icon:'🔔', title:'Trap Dispatcher',     sub:'Trap OID → topic map\nAlert threshold check\nSeverity classifier', tags:['trap-map','severity','alert'] },
+          { icon:'📡', title:'MQTT Publisher',       sub:'PUBLISH network/snmp/#\nQoS 0 polling, QoS 1 traps\nStructured JSON payload', tags:['PUBLISH','QoS0/1','JSON'] },
+        ]
+      },
+      {
+        name: 'Infrastructure', color: '#c77dff',
+        role: 'Config · MIB loading · logging · health endpoint',
+        boxes: [
+          { icon:'🗃️', title:'Config Loader',       sub:'Device IP + community\nOID list per device\nv3 creds + MIB dir paths', tags:['config.yaml','creds','MIB-dir'] },
+          { icon:'📝', title:'Logger',               sub:'OID resolution trace\nTRAP event structured log\nSNMP error code decode', tags:['winston','OID-trace','error'] },
+          { icon:'❤️', title:'Health Check',         sub:'SNMP sysUpTime ping\nMQTT connected check\nHTTP /health route', tags:['sysUpTime','ping','express'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'net-snmp',       desc:'SNMP v1/v2c/v3 — GET, GETNEXT, SET, TRAP, Inform' },
+      { name:'snmp-native',    desc:'High-perf native option for large MIB walks' },
+      { name:'mqtt.js',        desc:'MQTT TLS client with QoS 0/1 and reconnect' },
+      { name:'js-yaml',        desc:'OID map + device config + MIB path definitions' },
+      { name:'winston',        desc:'OID trace log, TRAP event audit, error codes' },
+      { name:'express',        desc:'/health SNMP ping check, /metrics route' },
+    ],
+    docker: {
+      service: 'snmp-bridge',
+      ports: [],
+      volumes: ['./config:/app/config','./mibs:/app/mibs'],
+      env: ['NODE_ENV=production','MQTT_URL=mqtts://broker:8883']
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  zigbee: {
+    title: '📶 ZIGBEE BRIDGE — Node.js Clean Architecture',
+    badge: 'Zigbee2MQTT · ZCL Clusters → MQTT Publisher',
+    color: '#76c442',
+    flowChain: [
+      'Zigbee Device','IEEE 802.15.4 RF','USB Coordinator',
+      'ZCL Cluster Decode','Attribute Reporter','Data Normalizer','MQTT Publisher','ZCL CMD Writer'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#76c442',
+        role: 'USB coordinator driver · Zigbee mesh management · MQTT client',
+        boxes: [
+          { icon:'📻', title:'Zigbee Coordinator', sub:'USB Dongle (CC2652/SONOFF)\nSerial /dev/ttyACM0\nZNP or EZSP firmware', tags:['zigbee2mqtt','CC2652','USB'] },
+          { icon:'🌐', title:'Mesh Network Mgr',   sub:'PAN coordinator role\nRoute discovery + cache\nLQI/RSSI monitoring', tags:['PAN','routing','LQI'] },
+          { icon:'🔒', title:'Network Security',   sub:'AES-128 NWK key encrypt\nAPS link key per device\nKey transport secured', tags:['AES-128','NWK-key','APS-key'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#f9c74f',
+        role: 'ZCL cluster decode · attribute report config · command write',
+        boxes: [
+          { icon:'📖', title:'ZCL Cluster Decoder',sub:'Temp: 0x0402, Hum: 0x0405\nOnOff: 0x0006, Lock: 0x0101\nCustom cluster support', tags:['ZCL','cluster-id','attribute'] },
+          { icon:'🔔', title:'Attribute Reporter', sub:'Configure reporting interval\nMin/Max time bounds\nReportable change Δ', tags:['ConfigureReporting','interval','delta'] },
+          { icon:'✏️', title:'ZCL Command Writer', sub:'Write attribute + command\nCluster-specific actions\nAES-128 MAC secured', tags:['WriteAttr','cmd','AES-128'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'Device registry · OTA updates · command routing',
+        boxes: [
+          { icon:'🗺️', title:'Device Registry',   sub:'IEEE addr → friendly name\nModel → converter map\nGroup membership store', tags:['IEEE-addr','converter','group'] },
+          { icon:'🔄', title:'OTA Update Manager', sub:'Firmware push to device\nImage block transfer\nVersion tracking', tags:['OTA','image-block','version'] },
+          { icon:'📤', title:'Command Handler',    sub:'Subscribe cmd/zigbee/#\nMap JSON → ZCL action\nOn/Off, Lock, SetPoint', tags:['SUBSCRIBE','ZCL-cmd','setpoint'] },
+        ]
+      },
+      {
+        name: 'Domain / Core', color: '#4cc9f0',
+        role: 'Data normalisation · deduplication · publish logic',
+        boxes: [
+          { icon:'⚙️', title:'Data Normalizer',   sub:'Raw int16 ÷ 100 = °C\nBitmask → status flags\nBattery % estimate', tags:['scale','bitmask','battery'] },
+          { icon:'🔍', title:'Change Detector',   sub:'Deduplicate attr reports\nDeadband on numerics\nPresence event debounce', tags:['dedupe','deadband','debounce'] },
+          { icon:'📡', title:'MQTT Publisher',     sub:'PUBLISH sensors/zigbee/#\nFriendly name in topic\nQoS 1, structured JSON', tags:['PUBLISH','friendly-name','QoS1'] },
+        ]
+      },
+      {
+        name: 'Infrastructure', color: '#c77dff',
+        role: 'Config YAML · frame logging · coordinator health check',
+        boxes: [
+          { icon:'🗃️', title:'Config Loader',     sub:'configuration.yaml\nDevice allow-list\nChannel + PAN ID settings', tags:['config.yaml','allow-list','PAN-ID'] },
+          { icon:'📝', title:'Logger',             sub:'ZCL frame hex trace\nDevice join/leave events\nNetwork key rotation log', tags:['winston','frame-trace','key-rotate'] },
+          { icon:'❤️', title:'Health Check',       sub:'Coordinator reachable\nDevice last-seen check\nMQTT bridge status', tags:['last-seen','coordinator','express'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'zigbee2mqtt',         desc:'Full Zigbee coordinator + ZCL cluster library' },
+      { name:'zigbee-herdsman',     desc:'Low-level Zigbee driver for CC2652 / SONOFF' },
+      { name:'mqtt.js',             desc:'Internal MQTT bridge client, TLS, reconnect' },
+      { name:'js-yaml',             desc:'Device config, allow-list, channel/PAN settings' },
+      { name:'winston',             desc:'ZCL frame hex logging, device event trace' },
+      { name:'express',             desc:'/health, /devices list, OTA status endpoints' },
+    ],
+    docker: {
+      service: 'zigbee-bridge',
+      ports: [],
+      volumes: ['./config:/app/config','./data:/app/data'],
+      devices: ['/dev/ttyACM0:/dev/ttyACM0'],
+      env: ['NODE_ENV=production','MQTT_URL=mqtts://broker:8883']
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  canbus: {
+    title: '🚌 CANBUS / BMS BRIDGE — Node.js Clean Architecture',
+    badge: 'CAN 2.0B · J1939 · BMS → MQTT Publisher',
+    color: '#c77dff',
+    flowChain: [
+      'BMS / ECU','CAN Bus 500kbit/s','SocketCAN vcan0',
+      'DBC Signal Decode','J1939 PGN Parser','Fault Detector','MQTT Publisher','CAN Frame TX'
+    ],
+    layers: [
+      {
+        name: 'Transport Layer', color: '#c77dff',
+        role: 'Linux SocketCAN raw socket · MQTT TLS client',
+        boxes: [
+          { icon:'🚌', title:'SocketCAN Adapter',  sub:'vcan0 / can0 interface\nLinux socketcan API\nRaw CAN 2.0B + ext frame', tags:['socketcan','vcan0','raw-socket'] },
+          { icon:'📻', title:'CAN Frame Receiver', sub:'11-bit + 29-bit ext IDs\nDLC + 8 data bytes\n500kbit/s bit timing', tags:['frame-rx','ext-id','500kbit'] },
+          { icon:'🔒', title:'MQTT TLS Client',    sub:'MQTT.js :8883 TLS 1.3\nmTLS client cert auth\nPersistent session', tags:['mqtt.js','mTLS','session'] },
+        ]
+      },
+      {
+        name: 'Protocol Adapter', color: '#f9c74f',
+        role: 'DBC file decode · J1939 PGN parsing · CAN TX frame builder',
+        boxes: [
+          { icon:'📖', title:'DBC Decoder',        sub:'Load .dbc signal file\nSigned/unsigned decode\nScale + offset apply', tags:['node-can','DBC','signal'] },
+          { icon:'🏗️', title:'J1939 PGN Parser',   sub:'PGN 0xF500 BMS status\nSource address routing\nSPN signal extraction', tags:['J1939','PGN','SPN'] },
+          { icon:'✏️', title:'CAN Frame Builder',  sub:'Build TX CAN frame bytes\nSend via SocketCAN\nTX error handling', tags:['tx-frame','socketcan-tx','error'] },
+        ]
+      },
+      {
+        name: 'Application / Use-Case', color: '#00e5ff',
+        role: 'BMS state machine · signal mapping · command routing',
+        boxes: [
+          { icon:'🔋', title:'BMS State Machine',  sub:'Charging / Discharging FSM\nFault detection logic\nCell balancing trigger', tags:['FSM','fault','balance'] },
+          { icon:'🗺️', title:'Signal Mapper',      sub:'DBC signal → topic path\nSoC / Voltage / Current\nCell min/max Δ voltage', tags:['signal-map','SoC','cell'] },
+          { icon:'📤', title:'Command Handler',    sub:'Subscribe cmd/bms/#\nDecode TX frame payload\nValidate PGN + range', tags:['SUBSCRIBE','PGN-write','validate'] },
+        ]
+      },
+      {
+        name: 'Domain / Core', color: '#76c442',
+        role: 'SI unit conversion · fault detection · publish logic',
+        boxes: [
+          { icon:'⚙️', title:'Data Normalizer',   sub:'Raw counts → SI units\nmV → V, raw → Amps\nSigned integer decode', tags:['SI','mV→V','signed'] },
+          { icon:'⚠️', title:'Fault Detector',    sub:'Cell Δ voltage threshold\nPack temperature limits\nOver/under voltage alert', tags:['fault','delta-V','temp-limit'] },
+          { icon:'📡', title:'MQTT Publisher',    sub:'PUBLISH bms/canbus/#\nQoS 1 for BMS critical\nQoS 0 for high-rate', tags:['PUBLISH','QoS1','high-rate'] },
+        ]
+      },
+      {
+        name: 'Infrastructure', color: '#ff6b35',
+        role: 'Config · frame hex logging · health endpoint',
+        boxes: [
+          { icon:'🗃️', title:'Config Loader',     sub:'can0 interface name\nDBC file path\nMQTT broker + cert path', tags:['config.yaml','DBC-path','can0'] },
+          { icon:'📝', title:'Logger',             sub:'CAN frame hex dump log\nSignal decode trace\nFault event audit trail', tags:['winston','hex-dump','audit'] },
+          { icon:'❤️', title:'Health Check',       sub:'CAN bus error counter\nBMS last-frame age check\nHTTP /health route', tags:['error-count','last-frame','express'] },
+        ]
+      },
+    ],
+    packages: [
+      { name:'socketcan',      desc:'Linux SocketCAN binding — raw CAN frame TX/RX' },
+      { name:'node-can',       desc:'DBC file parser, signal decoder, scale+offset' },
+      { name:'mqtt.js',        desc:'MQTT TLS client, QoS 0/1, auto-reconnect' },
+      { name:'js-yaml',        desc:'DBC path, CAN interface, signal→topic map' },
+      { name:'winston',        desc:'CAN frame hex dump, fault event audit log' },
+      { name:'express',        desc:'/health CAN error count, /bms/status route' },
+    ],
+    docker: {
+      service: 'canbus-bridge',
+      ports: [],
+      volumes: ['./config:/app/config','./dbc:/app/dbc'],
+      network: 'host',
+      env: ['NODE_ENV=production','MQTT_URL=mqtts://broker:8883','CAN_INTERFACE=can0']
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════
+//  ARCH MODAL RENDERER
+// ════════════════════════════════════════════════════════════
+function openArchModal(key) {
+  const d = ARCH_DATA[key]; if (!d) return;
+
+  // Header
+  document.getElementById('archModalTitle').textContent = d.title;
+  const badge = document.getElementById('archModalBadge');
+  badge.textContent = d.badge;
+  badge.style.cssText = `border-color:${d.color}55;color:${d.color};background:${d.color}14;
+    font-family:'Share Tech Mono',monospace;font-size:9px;padding:3px 10px;
+    border-radius:10px;border:1px solid;white-space:nowrap`;
+
+  // Flow chain
+  const flowHtml = d.flowChain.map((n,i) =>
+    `<span class="flow-chip" style="border-color:${d.color}${i===0||i===d.flowChain.length-1?'99':'33'};color:${i===0||i===d.flowChain.length-1?d.color:'var(--text2)'};background:${d.color}${i===0||i===d.flowChain.length-1?'12':'07'}">${n}</span>` +
+    (i < d.flowChain.length-1 ? '<span class="flow-arr">→</span>' : '')
+  ).join('');
+
+  // Layer stack
+  const layersHtml = d.layers.map((layer, li) => {
+    const boxes = layer.boxes.map(box => {
+      const tags = box.tags.map(t =>
+        `<span class="node-tag" style="border-color:${layer.color}44;color:${layer.color};background:${layer.color}0f">${t}</span>`
+      ).join('');
+      return `<div class="node-box" style="border-color:${layer.color}44;background:${layer.color}06">
+        <div class="node-box-title" style="color:${layer.color}">${box.icon} ${box.title}</div>
+        <div class="node-box-sub">${box.sub.replace(/\n/g,'<br>')}</div>
+        <div class="node-box-tags">${tags}</div>
+      </div>`;
+    }).join('');
+
+    const connector = li < d.layers.length - 1 ? `
+      <div class="layer-connector">
+        <div class="layer-connector-indent">
+          <span style="font-family:'Share Tech Mono',monospace;font-size:7px;color:${d.layers[li+1].color}66">depends on</span>
+        </div>
+        <div class="layer-connector-line" style="color:${d.layers[li+1].color}77"></div>
+      </div>` : '';
+
+    return `
+      <div class="layer-row">
+        <div class="layer-label-col" style="color:${layer.color};border-right-color:${layer.color}44">
+          ${layer.name.replace(' / ','<br>')}
+        </div>
+        <div class="layer-boxes-col">
+          <div style="width:100%">
+            <div style="font-family:'Share Tech Mono',monospace;font-size:7px;color:var(--text3);margin-bottom:6px;padding-bottom:4px;border-bottom:1px dashed ${layer.color}22">${layer.role}</div>
+            <div class="node-boxes">${boxes}</div>
+          </div>
+        </div>
+      </div>
+      ${connector}`;
+  }).join('');
+
+  // Packages
+  const pkgsHtml = (d.packages||[]).map(p =>
+    `<div class="pkg-card" style="border-color:${d.color}22">
+      <h4 style="color:${d.color}">📦 ${p.name}</h4>
+      <p>${p.desc}</p>
+    </div>`
+  ).join('');
+
+  // Docker
+  const dk = d.docker;
+  const portLines  = dk.ports?.length  ? `    ports:\n${dk.ports.map(p=>`      - "${p}"`).join('\n')}` : `    network_mode: ${dk.network||'bridge'}`;
+  const volLines   = `    volumes:\n${dk.volumes.map(v=>`      - ${v}`).join('\n')}`;
+  const devLines   = dk.devices?.length ? `\n    devices:\n${dk.devices.map(dv=>`      - ${dv}`).join('\n')}` : '';
+  const envLines   = `    environment:\n${dk.env.map(e=>`      - ${e}`).join('\n')}`;
+
+  const dockerHtml = `<span style="color:${d.color}80">services:</span>
+  <span style="color:var(--text)">${dk.service}:</span>
+    image: ${dk.service}:latest
+    restart: unless-stopped
+${portLines}
+${volLines}${devLines}
+${envLines}
+    healthcheck:
+      test: ["CMD","curl","-f","http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3`;
+
+  document.getElementById('archModalBody').innerHTML = `
+    <div>
+      <div class="modal-section-hdr" style="border-bottom-color:${d.color}22">
+        🔁 DATA FLOW CHAIN
+      </div>
+      <div class="flow-chain">${flowHtml}</div>
+    </div>
+    <div>
+      <div class="modal-section-hdr" style="border-bottom-color:${d.color}22">
+        🏗 CLEAN ARCHITECTURE LAYERS
+        <span style="font-size:7.5px;color:var(--text3);font-weight:normal;margin-left:10px">Outer → Inner · dependency rule ↓</span>
+      </div>
+      <div class="node-arch">${layersHtml}</div>
+    </div>
+    <div>
+      <div class="modal-section-hdr" style="border-bottom-color:${d.color}22">📦 NODE.JS PACKAGE DEPENDENCIES</div>
+      <div class="pkg-grid">${pkgsHtml}</div>
+    </div>
+    <div>
+      <div class="modal-section-hdr" style="border-bottom-color:${d.color}22">🐳 DOCKER COMPOSE DEPLOYMENT</div>
+      <div class="docker-block"><span style="color:${d.color}"><!-- docker-compose.yml (excerpt) --></span>
+${dockerHtml}</div>
+    </div>`;
+
+  document.getElementById('archModalOverlay').classList.add('open');
+}
+
+function closeArchModal() {
+  document.getElementById('archModalOverlay').classList.remove('open');
+}
+
+
+function openBrokerModal() {
+  document.getElementById('brokerOverlay').classList.add('open');
+}
+function closeBrokerModal() {
+  document.getElementById('brokerOverlay').classList.remove('open');
+}
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const btn = document.getElementById('themeBtn');
+  const isLight = html.classList.toggle('light');
+  btn.textContent = isLight ? '🌞 LIGHT' : '🌙 DARK';
+  // Redraw lines after theme change so SVG colours update
+  setTimeout(drawLines, 50);
+}
+
+// ════════════════════════════════════════════════════════════
+//  LIVE VALUE SIMULATION
+// ════════════════════════════════════════════════════════════
+const liveData = {
+  'v-plc':   { base:23.4,  noise:0.6,  fmt:v=>`${v.toFixed(1)}` },
+  'v-meter': { base:412.7, noise:3,    fmt:v=>`${v.toFixed(1)}` },
+  'v-volt':  { base:231,   noise:2,    fmt:v=>`${v.toFixed(0)}` },
+  'v-amp':   { base:14.2,  noise:0.4,  fmt:v=>`${v.toFixed(1)}` },
+  'v-hvac':  { base:21.0,  noise:0.2,  fmt:v=>`${v.toFixed(1)}` },
+  'v-hvac2': { base:20.8,  noise:0.3,  fmt:v=>`${v.toFixed(1)}` },
+  'v-vav':   { base:380,   noise:20,   fmt:v=>`${Math.round(v)}` },
+  'v-damp':  { base:67,    noise:3,    fmt:v=>`${Math.round(v)}` },
+  'v-switch':{ base:38,    noise:8,    fmt:v=>`${Math.round(v)}` },
+  'v-ports': { base:46,    noise:1,    fmt:v=>`${Math.round(v)}` },
+  'v-ups':   { base:97,    noise:0.8,  fmt:v=>`${v.toFixed(1)}` },
+  'v-load':  { base:42,    noise:4,    fmt:v=>`${Math.round(v)}` },
+  'v-sensor':{ base:19.8,  noise:0.6,  fmt:v=>`${v.toFixed(1)}` },
+  'v-hum':   { base:62,    noise:2.5,  fmt:v=>`${Math.round(v)}` },
+  'v-co2':   { base:412,   noise:15,   fmt:v=>`${Math.round(v)}` },
+  'v-motion':{ base:0,     noise:0,    fmt:_=> Math.random()>0.9 ? 'DETECTED' : 'clear' },
+  'v-lux':   { base:142,   noise:20,   fmt:v=>`${Math.round(v)}` },
+  'v-soc':   { base:87,    noise:0.3,  fmt:v=>`${v.toFixed(1)}` },
+  'v-bmsv':  { base:48.6,  noise:0.2,  fmt:v=>`${v.toFixed(2)}` },
+  'v-bmsi':  { base:-12.4, noise:1.5,  fmt:v=>`${v.toFixed(1)}` },
+  'v-cmin':  { base:3.18,  noise:0.02, fmt:v=>`${v.toFixed(3)}` },
+  'v-cmax':  { base:3.24,  noise:0.02, fmt:v=>`${v.toFixed(3)}` },
+  'v-btmp':  { base:31,    noise:1,    fmt:v=>`${v.toFixed(1)}` },
+  'v-pout':  { base:4.2,   noise:0.3,  fmt:v=>`${v.toFixed(2)}` },
+  'v-eff':   { base:97.1,  noise:0.4,  fmt:v=>`${v.toFixed(1)}` },
+};
+function r(d) { return d.base + (Math.random()-.5)*2*d.noise; }
+function updateLive() {
+  if (PAUSED) return;
+  Object.entries(liveData).forEach(([id,d]) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.textContent = d.fmt(r(d));
+    el.style.color = '#fff';
+    setTimeout(() => { el.style.color = ''; }, 350);
+  });
+  // broker stats
+  const bpub = document.getElementById('b-pub');
+  if (bpub) bpub.textContent = (8 + Math.round(Math.random()*4));
+}
+setInterval(updateLive, 1800);
+
+// ════════════════════════════════════════════════════════════
+//  PACKET PAYLOAD GENERATORS (detailed)
+// ════════════════════════════════════════════════════════════
+function rnd(min,max,dec=1){ return +(min+(max-min)*Math.random()).toFixed(dec); }
+function hex2(n){ return ('00'+Math.round(n).toString(16).toUpperCase()).slice(-2); }
+function nowStr(){ return new Date().toISOString().slice(11,23); }
+function hexRow(bytes){ return bytes.map(b=>('00'+b.toString(16).toUpperCase()).slice(-2)).join(' '); }
+
+const PKT_GENERATORS = {
+  modbus_dev: [
+    () => {
+      const temp=rnd(22,25,1), kw=rnd(410,420,1);
+      const ts=nowStr();
+      const rawBytes=[0x01,0x03,0x00,0x10,0x00,0x02,0xC4,0x0B];
+      return {
+        proto:'MODBUS RTU/TCP', color:'#ff6b35', icon:'🔌',
+        topic:'factory/modbus/plc-s7',
+        layer:'Device → Bridge',
+        summary:`PLC Siemens S7 → Modbus Bridge`,
+        ts,
+        fields:{
+          'Transaction ID':'0x0041','Protocol ID':'0x0000','Unit ID':'0x01',
+          'Function Code':'0x03 (Read Holding Registers)','Start Address':'0x0010',
+          'Quantity':'2 registers','Byte Count':'4',
+          'Reg[0x0010] (Temp)':`${temp}°C  (raw: 0x${(temp*10).toString(16).toUpperCase().padStart(4,'0')})`,
+          'Reg[0x0011] (kWh)':`${kw} kWh  (raw: 0x${(kw*10).toString(16).toUpperCase().padStart(4,'0')})`,
+          'CRC':'0x'+hex2(0xC4)+hex2(0x0B),'RTT':'1.2ms','Slave #1 Status':'online',
+        },
+        frameSegs:[
+          {label:'ADU',color:'#ff6b35',width:60},{label:'MBAP',color:'#ff8c5a',width:45},
+          {label:'PDU',color:'#ffa07a',width:55},{label:'CRC',color:'#ffb899',width:30},
+        ],
+        raw: hexRow([0x00,0x41,0x00,0x00,0x00,0x06,0x01,0x03,0x00,0x10,0x00,0x02,...rawBytes]),
+        journey:['PLC :502','Modbus Bridge','→ Normalize','→ MQTT PUBLISH'],
+        stats:['FC03','slave:1','250ms','RTU-over-TCP','CRC valid'],
+      };
+    },
+  ],
+  bacnet_dev: [
+    () => {
+      const pv=rnd(20.5,21.5,1), cfm=rnd(360,400,0), damp=rnd(60,75,0);
+      const ts=nowStr();
+      return {
+        proto:'BACNET/IP', color:'#f9c74f', icon:'🏢',
+        topic:'building/bacnet/hvac',
+        layer:'Device → Bridge',
+        summary:`Carrier AHU-3 COV Notification`,
+        ts,
+        fields:{
+          'BACnet Version':'1','BACnet Network':'192.168.10.0/24',
+          'Service':'UnconfirmedCOVNotification','Process ID':'0x12',
+          'Initiating Device':'Device 1003 (Carrier AHU-3)',
+          'Object ID':'AnalogInput:1 (Zone Temp)','Object Type':'AnalogInput',
+          'Property Identifier':'Present-Value',
+          'Present Value':`${pv}°C`,'Units':'degrees-Celsius',
+          'Status Flags':'[in-alarm:false, fault:false, overridden:false]',
+          'Remaining Time':'60s','COV Increment':'0.1°C',
+          'AirFlow (AO:2)':`${cfm} CFM`,'Damper Position':`${damp}%`,
+        },
+        frameSegs:[
+          {label:'BVLL',color:'#f9c74f',width:40},{label:'NPDU',color:'#fad16e',width:40},
+          {label:'APDU',color:'#fbe093',width:70},{label:'DATA',color:'#fdf0c0',width:40},
+        ],
+        raw: hexRow([0x81,0x0A,0x00,0x1C,0x01,0x20,0xFF,0xFF,0x00,0xFF,0x10,0x00,0xC4,0x02,0x00,0x03,0xEB]),
+        journey:['AHU-3 :47808','BACnet Bridge','COV Decode','→ MQTT PUBLISH'],
+        stats:['COV','device:1003','AI:1','UDP:47808','APDU confirmed'],
+      };
+    },
+  ],
+  snmp_dev: [
+    () => {
+      const cpu=rnd(30,55,0), batt=rnd(94,99,0), load=rnd(38,50,0);
+      const ts=nowStr();
+      return {
+        proto:'SNMP v2c', color:'#4cc9f0', icon:'📡',
+        topic:'network/snmp/core-switch',
+        layer:'Device → Bridge',
+        summary:`Cisco C9300 MIB-II Response`,
+        ts,
+        fields:{
+          'Version':'SNMPv2c','Community':'public (read-only)',
+          'PDU Type':'GetResponse','Request ID':'0x7F3A21',
+          'Error Status':'noError (0)','Error Index':'0',
+          'OID 1':'1.3.6.1.2.1.25.3.3.1.2.1 (hrProcessorLoad)',
+          'Value 1':`${cpu}% CPU utilization`,
+          'OID 2':'1.3.6.1.4.1.318.1.1.1.2.2.1.0 (upsAdvBatteryCapacity)',
+          'Value 2':`${batt}% battery`,
+          'OID 3':'1.3.6.1.4.1.318.1.1.1.4.2.3.0 (upsAdvOutputLoad)',
+          'Value 3':`${load}% output load`,
+          'ifNumber':'48','sysDescr':'Cisco IOS XE 17.9.1','sysUpTime':'42d 13h',
+        },
+        frameSegs:[
+          {label:'UDP',color:'#4cc9f0',width:35},{label:'SNMPv2',color:'#6dd4f4',width:50},
+          {label:'VarBind',color:'#90e0f7',width:65},{label:'OID',color:'#b8edfa',width:40},
+        ],
+        raw: hexRow([0x30,0x82,0x00,0x3E,0x02,0x01,0x01,0x04,0x06,0x70,0x75,0x62,0x6C,0x69,0x63,0xA2]),
+        journey:['Cisco :161','SNMP Bridge','OID walk','→ MQTT PUBLISH'],
+        stats:['SNMPv2c','UDP:161','GET 3 OIDs','community:public','30s interval'],
+      };
+    },
+  ],
+  zigbee_dev: [
+    () => {
+      const temp=rnd(19,21,1), hum=rnd(58,66,0), co2=rnd(400,450,0), lqi=rnd(200,250,0);
+      const ts=nowStr();
+      return {
+        proto:'ZIGBEE / ZCL', color:'#76c442', icon:'📶',
+        topic:'sensors/zigbee/aqara-01',
+        layer:'Device → Bridge',
+        summary:`Aqara WSDCGQ11LM ZCL Report`,
+        ts,
+        fields:{
+          'IEEE Addr':'0x00158D0004B3A9F2','Short Addr':'0x4A1B',
+          'PAN ID':'0x1A2F','Channel':'11 (2.462GHz)',
+          'Frame Type':'ZCL Data','Cluster':'0x0402 (Temperature Measurement)',
+          'Attribute':'0x0000 (MeasuredValue)','Data Type':'0x29 (int16s)',
+          'Temperature':`${temp}°C (raw: ${Math.round(temp*100)} × 0.01°C)`,
+          'Cluster 2':'0x0405 (Relative Humidity)','Humidity':`${hum}% RH`,
+          'Cluster 3':'0xFCC0 (Xiaomi Private)','CO₂':`${co2} ppm`,
+          'LQI (Link Quality)':`${Math.round(lqi)}/255`,'RSSI':'-52 dBm',
+          'Battery':'3.0V (92%)','Endpoint':'1','Profile':'HA 0x0104',
+        },
+        frameSegs:[
+          {label:'PHY',color:'#76c442',width:30},{label:'MAC',color:'#8fd156',width:40},
+          {label:'NWK',color:'#a8e070',width:40},{label:'APS',color:'#c0eb8a',width:35},
+          {label:'ZCL',color:'#d8f5b0',width:50},
+        ],
+        raw: hexRow([0x40,0x00,0x6F,0x0A,0x4A,0x1B,0x02,0x11,0x85,0x00,0x00,0x04,0x02,0x00,0x00,0x29,0x09,0x07]),
+        journey:['Aqara sensor','Zigbee Coordinator','ZCL decode','→ MQTT PUBLISH'],
+        stats:['ZHA Profile','cluster:0402','LQI:'+Math.round(lqi),'AES-128','mesh hop:1'],
+      };
+    },
+  ],
+  canbus_dev: [
+    () => {
+      const soc=rnd(85,90,1), volt=rnd(48.2,49.0,2), curr=rnd(-15,-10,1);
+      const cmin=rnd(3.15,3.20,3), cmax=rnd(3.21,3.26,3), tmp=rnd(29,34,1);
+      const pout=rnd(3.8,4.8,2), eff=rnd(96.5,97.8,1);
+      const ts=nowStr();
+      return {
+        proto:'CANBUS / BMS J1939', color:'#c77dff', icon:'🔋',
+        topic:'bms/canbus/orion-bms2',
+        layer:'Device → Bridge',
+        summary:`Orion BMS-2 Pack Status + Cell Monitor`,
+        ts,
+        fields:{
+          'CAN Frame ID':'0x0CF50001 (J1939 PGN 0xF500)','DLC':'8 bytes',
+          'Priority':'3','PGN':'0xF500 (BMS Status)','Source':'0x01',
+          'State of Charge (SoC)':`${soc}%`,'Pack Voltage':`${volt} V`,
+          'Pack Current':`${curr} A  (${ curr < 0 ? 'Discharging' : 'Charging'})`,
+          'Cell Min Voltage':`${cmin} V  (Cell #${Math.floor(Math.random()*16)+1})`,
+          'Cell Max Voltage':`${cmax} V  (Cell #${Math.floor(Math.random()*16)+1})`,
+          'Cell Δ Voltage':`${(cmax-cmin).toFixed(3)} V`,
+          'Pack Temperature':`${tmp}°C`,'Discharge Enable':'TRUE',
+          'Charge Enable':'TRUE','BMS Fault':'0x00 (no fault)',
+          'Inverter PGN':`0x1A100200  P_out: ${pout} kW  Eff: ${eff}%`,
+          'Balancing Active': Math.random()>0.7?'YES (2 cells)':'NO','Cycle Count':'142',
+        },
+        frameSegs:[
+          {label:'SOF',color:'#c77dff',width:20},{label:'ID',color:'#d494ff',width:40},
+          {label:'DLC',color:'#dbb0ff',width:25},{label:'DATA',color:'#e4ceff',width:65},
+          {label:'CRC',color:'#eddeff',width:30},{label:'ACK',color:'#f5eeff',width:20},
+        ],
+        raw: hexRow([0x04,0xCF,0x50,0x00,0x01,0x08,Math.round(soc*10/256),Math.round(soc*10%256),Math.round(volt*100/256),Math.round(volt*100%256),Math.round(Math.abs(curr)*10),0x00,Math.round(cmin*1000/256),Math.round(cmin*1000%256),Math.round(cmax*1000/256),Math.round(cmax*1000%256)]),
+        journey:['Orion BMS-2','SocketCAN','DBC decode','J1939 PGN','→ MQTT PUBLISH'],
+        stats:['J1939','PGN:0xF500','500kbit/s','11-bit ID','CRC+ACK'],
+      };
+    },
+  ],
+  mqtt_pub: [
+    (proto, topic) => {
+      const ts = nowStr();
+      const payloads = {
+        modbus: `{"device":"plc-s7-01","slave":1,"reg":16,"temp":${rnd(22,25,1)},"kwh":${rnd(410,420,1)},"voltage":${rnd(229,233,0)},"current":${rnd(13.5,15.0,1)},"ts":"${ts}"}`,
+        bacnet: `{"device":"carrier-ahu3","obj":"AI:1","pv":${rnd(20.5,21.5,1)},"sp":21.0,"airflow":${rnd(360,400,0)},"damper":${rnd(60,75,0)},"ts":"${ts}"}`,
+        snmp:   `{"device":"cisco-c9300","cpu":${rnd(30,55,0)},"batt":${rnd(94,99,0)},"load":${rnd(38,50,0)},"uptime":"42d 13h","ts":"${ts}"}`,
+        zigbee: `{"device":"aqara-01","temp":${rnd(19,21,1)},"humidity":${rnd(58,66,0)},"co2":${rnd(400,450,0)},"lqi":${rnd(200,250,0)},"ts":"${ts}"}`,
+        canbus: `{"device":"orion-bms2","soc":${rnd(85,90,1)},"voltage":${rnd(48.2,49.0,2)},"current":${rnd(-15,-10,1)},"cell_min":${rnd(3.15,3.20,3)},"cell_max":${rnd(3.21,3.26,3)},"temp":${rnd(29,34,1)},"fault":0,"ts":"${ts}"}`,
+      };
+      const key = Object.keys(payloads).find(k=>topic.includes(k)) || 'modbus';
+      return {
+        proto:'MQTT 3.1.1', color:'#00e5ff', icon:'⚡',
+        topic, layer:'Bridge → MQTT Broker',
+        summary:`MQTT PUBLISH  QoS:1  Retain:false`,
+        ts,
+        fields:{
+          'Control Packet':'PUBLISH (0x30)','QoS Level':'1 (at least once)',
+          'Retain Flag':'false','Dup Flag':'false',
+          'Packet Identifier':'0x'+Math.floor(Math.random()*0xFFFF).toString(16).toUpperCase().padStart(4,'0'),
+          'Topic':topic,'Payload Length':`${payloads[key].length} bytes`,
+          'Payload (JSON)':payloads[key],
+          'Broker':'mosquitto 2.0.18','Port':'1883 (TCP)','TLS':'disabled (internal)',
+          'Keep-Alive':'60s','Client ID':`bridge-${key}-01`,
+        },
+        frameSegs:[
+          {label:'Fixed Hdr',color:'#00e5ff',width:40},{label:'Var Hdr',color:'#33ecff',width:45},
+          {label:'Topic',color:'#66f2ff',width:55},{label:'Pkt ID',color:'#99f7ff',width:35},
+          {label:'Payload',color:'#ccfbff',width:60},
+        ],
+        raw: hexRow([0x30,0x00,0x00,topic.length,...[...topic].map(c=>c.charCodeAt(0)),0x00,0x01]),
+        journey:['Bridge Service','TCP :1883','Mosquitto','→ PUB to subscribers'],
+        stats:['QoS:1','PUBACK','retain:no','JSON payload','UTF-8'],
+      };
+    },
+  ],
+  consumer_out: [
+    (dest, proto) => {
+      const ts = nowStr();
+      const influxLine = `factory,device=plc-s7-01 temp=${rnd(22,25,1)},kwh=${rnd(410,420,1)} ${Date.now()}000000`;
+      const sqlInsert = `INSERT INTO bms_data(device,soc,voltage,current,ts) VALUES('orion-bms2',${rnd(85,90,1)},${rnd(48.2,49.0,2)},${rnd(-15,-10,1)},'${ts}')`;
+      const wsEvent = `{"type":"update","channel":"live","metric":"temp","value":${rnd(19,25,1)},"topic":"sensors/zigbee/aqara-01","ts":"${ts}"}`;
+      const ruleMatch = `{"rule":"high_temp_alert","condition":"temp > 24.5","value":${rnd(24.5,25.5,1)},"action":"send_email","recipients":["ops@company.com"],"ts":"${ts}"}`;
+      const anomaly = `{"model":"IsolationForest","topic":"bms/canbus/orion-bms2","score":${rnd(0.05,0.92,2)},"threshold":0.75,"anomaly":${Math.random()>0.6},"feature":"cell_delta","ts":"${ts}"}`;
+      const payloadMap = { influx: influxLine, timescale: sqlInsert, grafana: wsEvent, webapp: wsEvent, rules: ruleMatch, ml: anomaly };
+      const pKey = Object.keys(payloadMap).find(k=>dest.toLowerCase().includes(k)) || 'influx';
+      return {
+        proto: dest, color: dest.includes('influx')||dest.includes('scale')?'#ffd60a':dest.includes('rules')||dest.includes('ml')?'#ff9f1c':'#56cfe1',
+        icon:'📤', topic:`${dest} internal`, layer:'Consumer → Output',
+        summary:`Data write / dispatch to ${dest}`,
+        ts,
+        fields:{
+          'Destination': dest,'Operation': pKey==='influx'?'Line Protocol Write':pKey==='timescale'?'SQL INSERT':pKey==='rules'?'Rule Evaluation':'WebSocket Push',
+          'Payload': payloadMap[pKey],
+          'Latency':`${rnd(0.5,8,1)}ms`,'Rows Written': pKey.includes('influx')||pKey.includes('scale')?Math.floor(Math.random()*4+1):'N/A',
+          'Status':'200 OK','Compression': pKey==='influx'?'gzip':'none',
+        },
+        frameSegs:[
+          {label:'APP',color:'#ffd60a',width:40},{label:'PAYLOAD',color:'#ffe566',width:80},{label:'ACK',color:'#fff0a0',width:30},
+        ],
+        raw: hexRow([0x48,0x54,0x54,0x50,0x2F,0x31,0x2E,0x31,0x20,0x32,0x30,0x30]),
+        journey:['MQTT Subscriber','Deserialize JSON','Transform',`Write to ${dest}`],
+        stats:['TCP','JSON','async','batched','ACK'],
+      };
+    },
+  ],
+};
+
+// ════════════════════════════════════════════════════════════
+//  GEOMETRY
+// ════════════════════════════════════════════════════════════
+function midY(el,ref){const e=el.getBoundingClientRect(),r=ref.getBoundingClientRect();return e.top+e.height/2-r.top}
+function midX(el,ref){const e=el.getBoundingClientRect(),r=ref.getBoundingClientRect();return e.left+e.width/2-r.left}
+function rightX(el,ref){const e=el.getBoundingClientRect(),r=ref.getBoundingClientRect();return e.right-r.left}
+function leftX(el,ref){const e=el.getBoundingClientRect(),r=ref.getBoundingClientRect();return e.left-r.left}
+
+// ════════════════════════════════════════════════════════════
+//  DRAW STATIC LINES (with animated dashes)
+// ════════════════════════════════════════════════════════════
+function drawLines() {
+  const svg = document.getElementById('arch-svg');
+  const wrap = document.getElementById('arch-wrap');
+  const broker = document.getElementById('mqtt-broker');
+  // Inject SVG animation styles once into document head
+  if (!document.getElementById('svg-dash-styles')) {
+    const st = document.createElement('style');
+    st.id = 'svg-dash-styles';
+    st.textContent = '.dash-anim{stroke-dasharray:6 8;animation:dashFlow 1.4s linear infinite}.dash-anim-r{stroke-dasharray:6 8;animation:dashFlowR 1.4s linear infinite}@keyframes dashFlow{to{stroke-dashoffset:-28}}@keyframes dashFlowR{to{stroke-dashoffset:28}}';
+    document.head.appendChild(st);
+  }
+  svg.innerHTML = '<defs>' +
+    '<filter id="gf"><feGaussianBlur stdDeviation="2" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>' +
+    '<filter id="gf2"><feGaussianBlur stdDeviation="3" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>' +
+    '</defs>';
+
+  const bx = midX(broker,wrap), by = midY(broker,wrap);
+
+  function addPath(x1,y1,x2,y2,color,op,fw,filter,animated,rtl) {
+    const cx=x1+(x2-x1)*.52;
+    // base dim line
+    const base=document.createElementNS('http://www.w3.org/2000/svg','path');
+    base.setAttribute('d',`M ${x1} ${y1} C ${cx} ${y1},${cx} ${y2},${x2} ${y2}`);
+    base.setAttribute('stroke',color);base.setAttribute('stroke-width',fw||'1.2');
+    base.setAttribute('fill','none');base.setAttribute('stroke-opacity','0.12');
+    svg.appendChild(base);
+    if (animated) {
+      // animated flowing dash on top
+      const anim=document.createElementNS('http://www.w3.org/2000/svg','path');
+      anim.setAttribute('d',`M ${x1} ${y1} C ${cx} ${y1},${cx} ${y2},${x2} ${y2}`);
+      anim.setAttribute('stroke',color);anim.setAttribute('stroke-width',fw||'1.2');
+      anim.setAttribute('fill','none');anim.setAttribute('stroke-opacity',op||'0.45');
+      anim.setAttribute('class', rtl ? 'dash-anim-r' : 'dash-anim');
+      anim.setAttribute('filter',`url(#${filter||'gf'})`);
+      svg.appendChild(anim);
+    }
+  }
+
+  // ── Forward paths: devices → bridges (telemetry →) ──
+  const devBridges=[
+    {devs:['dev-plc','dev-meter'],            br:'p-modbus',c:'#ff6b35'},
+    {devs:['dev-hvac','dev-vav'],             br:'p-bacnet',c:'#f9c74f'},
+    {devs:['dev-switch','dev-ups'],           br:'p-snmp',  c:'#4cc9f0'},
+    {devs:['dev-sensor','dev-motion'],        br:'p-zigbee',c:'#76c442'},
+    {devs:['dev-bms','dev-cell','dev-inv'],   br:'p-canbus',c:'#c77dff'},
+  ];
+  devBridges.forEach(({devs,br,c})=>{
+    const brel=document.getElementById(br); if(!brel)return;
+    devs.forEach(id=>{
+      const d=document.getElementById(id); if(!d)return;
+      const rx=rightX(d,wrap), lx=leftX(brel,wrap);
+      const dy=midY(d,wrap),   by2=midY(brel,wrap);
+      // forward: device → bridge
+      addPath(rx,dy, lx,by2, c,'0.42','1.2','gf', true, false);
+      // reverse: bridge → device (CMD, dimmer + RTL dash)
+      addPath(lx,by2, rx,dy, c,'0.18','1.0','gf', true, true);
+    });
+  });
+
+  // ── Forward: bridges → broker ──  Reverse: broker → bridges (CMD dispatch) ──
+  const protos=[{id:'p-modbus',c:'#ff6b35'},{id:'p-bacnet',c:'#f9c74f'},{id:'p-snmp',c:'#4cc9f0'},{id:'p-zigbee',c:'#76c442'},{id:'p-canbus',c:'#c77dff'}];
+  protos.forEach(({id,c})=>{
+    const el=document.getElementById(id); if(!el)return;
+    const ex=rightX(el,wrap), ey=midY(el,wrap);
+    addPath(ex,ey, bx-57,by, c,'0.55','1.9','gf2', true, false); // → broker
+    addPath(bx-57,by, ex,ey, c,'0.20','1.2','gf',  true, true);  // ← cmd
+  });
+
+  // ── Forward: broker → consumers ──  Reverse: consumers → broker (PUBLISH cmd) ──
+  [{id:'c-influx',c:'#ffd60a'},{id:'c-timescale',c:'#ffd60a'},{id:'c-grafana',c:'#56cfe1'},{id:'c-webapp',c:'#56cfe1'},{id:'c-rules',c:'#ff9f1c'}].forEach(({id,c})=>{
+    const el=document.getElementById(id); if(!el)return;
+    const lx=leftX(el,wrap), ey=midY(el,wrap);
+    addPath(bx+57,by, lx,ey, c,'0.50','1.9','gf2', true, true);  // → consumer
+    addPath(lx,ey, bx+57,by, c,'0.20','1.2','gf',  true, false); // ← cmd publish
+  });
+
+  // ── Forward: consumers → outputs ──  Reverse: outputs → consumers (alerts/cmds) ──
+  [{cons:'c-influx',outs:['out-dashboard','out-alert'],c:'#ffd60a'},
+   {cons:'c-timescale',outs:['out-sql'],c:'#ffd60a'},
+   {cons:'c-grafana',outs:['out-map'],c:'#56cfe1'},
+   {cons:'c-webapp',outs:['out-mobile','out-scada'],c:'#56cfe1'},
+   {cons:'c-rules',outs:['out-action','out-ml'],c:'#ff9f1c'},
+  ].forEach(({cons,outs,c})=>{
+    const cel=document.getElementById(cons); if(!cel)return;
+    outs.forEach(oid=>{
+      const oel=document.getElementById(oid); if(!oel)return;
+      const cx2=rightX(cel,wrap), cy=midY(cel,wrap);
+      const ox=leftX(oel,wrap),   oy=midY(oel,wrap);
+      addPath(cx2,cy, ox,oy, c,'0.35','1.1','gf', true, true);  // → output
+      addPath(ox,oy, cx2,cy, c,'0.18','0.9','gf', true, false); // ← cmd/alert back
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  PACKET ANIMATION + TRACER
+// ════════════════════════════════════════════════════════════
+function animPkt({x1,y1,x2,y2,color,miniLabel,pktData,delay=0}) {
+  if (PAUSED) return;
+  const wrap = document.getElementById('arch-wrap');
+  const cx = x1+(x2-x1)*.52;
+  const steps = Math.round(70/SPEED);
+  const dur = Math.round(1100/SPEED);
+
+  PKT_COUNT++;
+  document.getElementById('pktCount').textContent = PKT_COUNT;
+
+  // Log it
+  PKT_LOG.unshift({
+    id: PKT_COUNT,
+    ts: nowStr(),
+    proto: pktData.proto||'',
+    summary: pktData.summary||'',
+    color,
+    data: pktData,
+  });
+  if (PKT_LOG.length > 80) PKT_LOG.pop();
+
+  const dot = document.createElement('div');
+  dot.className = 'pkt-dot';
+  dot.style.cssText = `background:${color};box-shadow:0 0 10px ${color},0 0 24px ${color}88;left:${x1}px;top:${y1}px;opacity:0`;
+  dot.title = 'Click to inspect packet';
+  dot.onclick = (e) => { e.stopPropagation(); openTracer(pktData, PKT_COUNT); };
+
+  const tag = document.createElement('div');
+  tag.className = 'pkt-label';
+  tag.style.color = color;
+  tag.style.borderColor = color+'44';
+  tag.style.display = 'none';
+  tag.innerHTML = miniLabel.replace(/\n/g,'<br>');
+  tag.style.pointerEvents = 'none';
+
+  wrap.appendChild(dot);
+  wrap.appendChild(tag);
+
+  let f = 0;
+  function bez(t,ax,ay,b2x,b2y,c2x,c2y,dx,dy){
+    const m=1-t;
+    return{x:m*m*m*ax+3*m*m*t*b2x+3*m*t*t*c2x+t*t*t*dx,y:m*m*m*ay+3*m*m*t*b2y+3*m*t*t*c2y+t*t*t*dy};
+  }
+  function tick(){
+    if(PAUSED){setTimeout(tick,50);return;}
+    f++;const t=f/steps;
+    if(t>1){dot.remove();tag.remove();return;}
+    const p=bez(t,x1,y1,cx,y1,cx,y2,x2,y2);
+    const op=t<0.07?t/0.07:t>0.9?(1-t)/0.1:1;
+    dot.style.left=p.x+'px';dot.style.top=p.y+'px';dot.style.opacity=op;
+    if(t>0.2&&t<0.8){
+      tag.style.display='block';tag.style.left=p.x+'px';tag.style.top=p.y+'px';
+      const to=t<0.28?(t-0.2)/0.08:t>0.72?(0.8-t)/0.08:1;
+      tag.style.opacity=Math.max(0,Math.min(1,to));
+    } else { tag.style.display='none'; }
+    setTimeout(tick,dur/steps);
+  }
+  setTimeout(()=>tick(),delay);
+}
+
+// ════════════════════════════════════════════════════════════
+//  TRACER MODAL
+// ════════════════════════════════════════════════════════════
+function openTracer(pkt, id) {
+  document.getElementById('tracerTitle').innerHTML = `⬡ PACKET TRACER &nbsp;<span style="font-size:9px;opacity:.5">#${id}</span>`;
+  const body = document.getElementById('tracerBody');
+  const c = pkt.color || '#00e5ff';
+
+  // Journey bar
+  const journeyHtml = (pkt.journey||[]).map((s,i)=>`
+    <span class="journey-step" style="border-color:${c}44;color:${c}">${s}</span>
+    ${i<pkt.journey.length-1?'<span class="journey-arrow">→</span>':''}
+  `).join('');
+
+  // Frame segments bar
+  const segsHtml = (pkt.frameSegs||[]).map(s=>
+    `<div class="frame-seg" style="background:${s.color};flex:${s.width}">${s.label}</div>`
+  ).join('');
+
+  // Fields
+  const fieldsHtml = Object.entries(pkt.fields||{}).map(([k,v])=>`
+    <div class="field-row">
+      <span class="field-key">${k}</span>
+      <span class="field-val ${k.toLowerCase().includes('fault')?'ok':k.toLowerCase().includes('error')?'err':''}">${v}</span>
+    </div>
+  `).join('');
+
+  // Hex dump with address
+  const hexBytes = (pkt.raw||'').split(' ');
+  let hexHtml='';
+  for(let i=0;i<hexBytes.length;i+=8){
+    const row=hexBytes.slice(i,i+8);
+    const addr=('000'+i.toString(16).toUpperCase()).slice(-4);
+    hexHtml+=`<span class="hex-addr">${addr}:</span>`;
+    row.forEach(b=>{ hexHtml+=`<span class="hex-byte" title="byte: 0x${b}  dec: ${parseInt(b,16)}">${b}</span>`; });
+    const ascii = row.map(b=>{const cc=parseInt(b,16);return cc>=32&&cc<127?String.fromCharCode(cc):'.'}).join('');
+    hexHtml+=` &nbsp; <span style="color:rgba(255,255,255,0.2)">${ascii}</span>\n`;
+  }
+
+  // Stats badges
+  const statsHtml = (pkt.stats||[]).map(s=>`<span class="stat-badge">${s}</span>`).join('');
+
+  // Recent packet log (last 8)
+  const logHtml = PKT_LOG.slice(0,10).map((p,i)=>`
+    <div class="pkt-log-row ${p.id===id?'active':''}" onclick="openTracerFromLog(${i})">
+      <span style="color:${p.color}">#${p.id}</span>
+      <span>${p.ts}</span>
+      <span>${p.summary.slice(0,35)}</span>
+      <span style="color:${p.color}">${p.proto.slice(0,12)}</span>
+    </div>
+  `).join('');
+
+  body.innerHTML = `
+    <!-- Journey -->
+    <div class="tracer-section">
+      <div class="tracer-section-hdr" style="color:${c}">
+        <span style="color:${c}">${pkt.icon||'⬡'}</span> ${pkt.proto} &nbsp;·&nbsp;
+        <span style="opacity:.6;font-size:9px">${pkt.layer}</span>
+        <span style="margin-left:auto;font-size:8px;opacity:.4">${pkt.ts}</span>
+      </div>
+      <div class="tracer-section-body">
+        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#e8e8ff;margin-bottom:8px">${pkt.summary}</div>
+        <div class="journey">${journeyHtml}</div>
+        <div class="stat-badges" style="margin-top:6px">${statsHtml}</div>
+      </div>
+    </div>
+
+    <!-- Frame Structure -->
+    <div class="tracer-section">
+      <div class="tracer-section-hdr" style="color:rgba(255,255,255,0.5)">📦 FRAME STRUCTURE</div>
+      <div class="tracer-section-body">
+        <div style="font-size:8px;color:rgba(255,255,255,0.28);margin-bottom:4px">Protocol frame layout (proportional)</div>
+        <div class="frame-timeline">${segsHtml}</div>
+      </div>
+    </div>
+
+    <!-- Decoded Fields -->
+    <div class="tracer-section">
+      <div class="tracer-section-hdr" style="color:rgba(255,255,255,0.5)">🔍 DECODED FIELDS</div>
+      <div class="tracer-section-body">${fieldsHtml}</div>
+    </div>
+
+    <!-- Hex Dump -->
+    <div class="tracer-section">
+      <div class="tracer-section-hdr" style="color:rgba(255,255,255,0.5)">💾 RAW BYTES (hover to inspect)</div>
+      <div class="tracer-section-body">
+        <div style="font-size:8px;color:rgba(255,255,255,0.25);margin-bottom:4px">
+          MQTT topic: <span style="color:${c}">${pkt.topic}</span>
+        </div>
+        <div class="hex-dump">${hexHtml}</div>
+      </div>
+    </div>
+
+    <!-- Recent Packets -->
+    <div class="tracer-section">
+      <div class="tracer-section-hdr" style="color:rgba(255,255,255,0.5)">🕐 RECENT PACKETS (click to inspect)</div>
+      <div class="tracer-section-body" style="padding:0">
+        <div class="pkt-log scrollbar-thin">
+          <div class="pkt-log-row pkt-log-hdr">
+            <span>#</span><span>TIME</span><span>SUMMARY</span><span>PROTO</span>
+          </div>
+          ${logHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('tracerOverlay').classList.add('open');
+}
+
+function openTracerFromLog(idx) {
+  const p = PKT_LOG[idx];
+  if (p) openTracer(p.data, p.id);
+}
+
+function closeTracer() {
+  document.getElementById('tracerOverlay').classList.remove('open');
+}
+document.getElementById('tracerOverlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('tracerOverlay')) closeTracer();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeTracer(); closeBrokerModal(); closeArchModal(); } });
+document.getElementById('brokerOverlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('brokerOverlay')) closeBrokerModal();
+});
+document.getElementById('archModalOverlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('archModalOverlay')) closeArchModal();
+});
+
+// ════════════════════════════════════════════════════════════
+//  REVERSE-DIRECTION PACKET DATA GENERATORS
+// ════════════════════════════════════════════════════════════
+function cmdPkt(topic, label, fields, color) {
+  const ts = new Date().toISOString().slice(11,23);
+  return {
+    proto:'MQTT COMMAND', color, icon:'📤',
+    topic, layer:'Command / Control (← reverse)',
+    summary: label, ts,
+    fields: {
+      'Direction':'← REVERSE (command/control)',
+      'MQTT Topic': topic,
+      'QoS':'1 (at least once)',
+      'Retain':'false',
+      ...fields,
+      'Timestamp': ts,
+    },
+    frameSegs:[
+      {label:'Fixed Hdr',color,width:38},{label:'Topic',color,width:55},
+      {label:'Pkt ID',color,width:32},{label:'CMD Payload',color,width:70},
+    ],
+    raw: [0x32,0x00,...[...topic].slice(0,12).map(c=>c.charCodeAt(0))].map(b=>('00'+b.toString(16).toUpperCase()).slice(-2)).join(' '),
+    journey:['Output/Rules','Consumer','MQTT Broker','Bridge','→ Device'],
+    stats:['CMD','QoS:1','reverse','PUBLISH','retained:no'],
+  };
+}
+
+const CMD_FLOWS = [
+  // Rules/Automation → broker → bridge → device
+  { src:'out-action', dst:'c-rules',   color:'#ff9f1c', interval:4200,
+    make:()=>cmdPkt('cmd/modbus/plc-s7/setpoint','Node-RED → PLC setpoint write',
+      {'Command':'FC06 Write Single Register','Register':'0x0020','Value':'22.5°C setpoint','Trigger':'High-temp rule #4','Rule ID':'rule-temp-hvac-01'}, '#ff9f1c') },
+  { src:'out-action', dst:'c-rules',   color:'#ff9f1c', interval:6800,
+    make:()=>cmdPkt('cmd/bacnet/hvac/setpoint','Automation → AHU-3 setpoint',
+      {'Command':'BACnet WriteProperty','Object':'AnalogOutput:1','Value':'20.0°C','Trigger':'Schedule 08:00','Source':'Node-RED flow #12'}, '#ff9f1c') },
+  { src:'out-ml',     dst:'c-rules',   color:'#ff9f1c', interval:9100,
+    make:()=>cmdPkt('cmd/bms/canbus/charge-limit','ML anomaly → BMS charge limit',
+      {'Command':'CAN 0x18FF50E5 PGN write','Parameter':'MaxChargeCurrent','Value':'8.0A (reduced)','Reason':'Cell delta anomaly score: 0.87','Model':'IsolationForest v2'}, '#ff9f1c') },
+
+  // Rules → broker (PUBLISH command)
+  { src:'c-rules', dst:'broker-pub',   color:'#ff9f1c', interval:5000,
+    make:()=>cmdPkt('cmd/factory/modbus/valve-01','Rules engine PUBLISH command',
+      {'Payload':'{"action":"set","register":"0x0031","value":1,"comment":"open valve"}','QoS':'1','Client ID':'node-red-01','ACL':'write allowed'}, '#ff9f1c') },
+  { src:'c-rules', dst:'broker-pub',   color:'#c77dff', interval:7400,
+    make:()=>cmdPkt('cmd/bms/canbus/balancer','BMS balancer command via Rules',
+      {'Payload':'{"pgn":"0xFE4E","action":"start_balancing","cells":"1,4,7","threshold":"0.025V"}','QoS':'1','Client ID':'node-red-bms','Source':'ML inference'}, '#c77dff') },
+
+  // Broker → bridge (command dispatch)
+  { src:'broker-pub', dst:'p-modbus',  color:'#ff6b35', interval:5300,
+    make:()=>cmdPkt('cmd/factory/modbus/plc-s7','Broker dispatches CMD to Modbus bridge',
+      {'Bridge Action':'FC06 Write Single Register','Target':'slave:1 reg:0x0020','Payload':'0x00E1 (22.5 × 10)','MQTT→Modbus':'JSON decoded → RTU frame','TLS':'terminated at bridge'}, '#ff6b35') },
+  { src:'broker-pub', dst:'p-bacnet',  color:'#f9c74f', interval:8200,
+    make:()=>cmdPkt('cmd/building/bacnet/ahu3','Broker dispatches CMD to BACnet bridge',
+      {'Bridge Action':'WriteProperty','Object':'AnalogOutput:1 on Device 1003','Payload':'20.0 (float)','MQTT→BACnet':'JSON → APDU encode','Port':'UDP :47808'}, '#f9c74f') },
+  { src:'broker-pub', dst:'p-canbus',  color:'#c77dff', interval:10500,
+    make:()=>cmdPkt('cmd/bms/canbus/orion-bms2','Broker dispatches CMD to BMS bridge',
+      {'Bridge Action':'CAN frame TX','CAN ID':'0x18FF50E5','PGN':'0xFE4E BMS Write','DLC':'8','SocketCAN':'vcan0 TX','CRC':'auto'}, '#c77dff') },
+  { src:'broker-pub', dst:'p-zigbee',  color:'#76c442', interval:12000,
+    make:()=>cmdPkt('cmd/sensors/zigbee/lock-01','Broker dispatches CMD to Zigbee bridge',
+      {'Bridge Action':'ZCL Write Attribute','Cluster':'0x0101 (DoorLock)','Command':'LockDoor (0x00)','IEEE':'0x00158D0004B3A9F2','ZCL Seq':'0x3A'}, '#76c442') },
+
+  // Bridge → device (write-back)
+  { src:'p-modbus', dst:'dev-plc',     color:'#ff6b35', interval:5600,
+    make:()=>cmdPkt('modbus-rtu://slave:1/reg:0x0020','Modbus write to PLC register',
+      {'Frame':'01 06 00 20 00 E1 xx xx','Function':'FC06 Write Single Reg','Slave':'01','Register':'0x0020','Value':'0x00E1 = 22.5°C','Expected ACK':'echo frame'}, '#ff6b35') },
+  { src:'p-bacnet', dst:'dev-hvac',    color:'#f9c74f', interval:8600,
+    make:()=>cmdPkt('bacnet://192.168.10.50/AO:1','BACnet WriteProperty to AHU-3',
+      {'Service':'ConfirmedWriteProperty','Object ID':'AnalogOutput:1','Value':'20.0','Priority':'8 (manual operator)','APDU Type':'0x00 Confirmed-REQ','Invoke ID':'0x1F'}, '#f9c74f') },
+  { src:'p-canbus', dst:'dev-bms',     color:'#c77dff', interval:10900,
+    make:()=>cmdPkt('can://vcan0/0x18FF50E5','CAN frame write to Orion BMS-2',
+      {'CAN ID':'0x18FF50E5 (ext)','PGN':'0xFE4E','Byte[0]':'MaxChargeCurrent = 80 (8.0A×10)','Byte[1-2]':'MaxDischarge = 0x0384','DLC':'8','ACK':'dominant bit'}, '#c77dff') },
+  { src:'p-zigbee', dst:'dev-motion',  color:'#76c442', interval:12400,
+    make:()=>cmdPkt('zigbee://0x4A1B/cluster:0x0101','Zigbee ZCL command to Smart Lock',
+      {'IEEE':'0x00158D0004B3A9F2','Short Addr':'0x4A1B','Cluster':'0x0101 DoorLock','Command':'0x00 LockDoor','Frame':'41 00 00 C2 00','AES-128':'MAC encrypted'}, '#76c442') },
+
+  // SCADA/WebApp → broker (operator commands)
+  { src:'out-scada', dst:'c-webapp',   color:'#56cfe1', interval:11000,
+    make:()=>cmdPkt('cmd/factory/modbus/pump-02','SCADA operator → pump command',
+      {'Source':'SCADA P&ID operator action','Operator':'user@scada (MFA verified)','Action':'START pump-02','WSS':'wss://broker:9002','JWT':'eyJ... (valid 15m)'}, '#56cfe1') },
+  { src:'c-webapp',  dst:'broker-pub', color:'#56cfe1', interval:11400,
+    make:()=>cmdPkt('cmd/factory/modbus/pump-02','WebApp PUBLISH → MQTT broker',
+      {'Payload':'{"device":"pump-02","action":"start","reg":"0x0041","val":1}','Client':'scada-webapp-01','ACL':'cmd/factory/# write allowed','QoS':'1'}, '#56cfe1') },
+
+  // Output → output cross-flow (alert → mobile)
+  { src:'out-alert', dst:'out-mobile', color:'#ffd60a', interval:13500,
+    make:()=>cmdPkt('alert/push/mobile','Alert engine → Mobile push notification',
+      {'Service':'Firebase FCM','Token':'device_token_abc123','Title':'⚠ High Temperature Alert','Body':'PLC Temp: 24.8°C > threshold 24.5°C','Priority':'high','TTL':'60s'}, '#ffd60a') },
+
+  // Grafana → broker ACK (dashboard refresh request)
+  { src:'c-grafana', dst:'broker-pub', color:'#56cfe1', interval:15000,
+    make:()=>cmdPkt('$SYS/broker/clients/grafana-01','Grafana SUBSCRIBE refresh ping',
+      {'Type':'PINGREQ','Keep-Alive':'60s','Client':'grafana-datasource-01','Subscriptions':'factory/#, sensors/#, bms/#','Action':'re-subscribe after reconnect'}, '#56cfe1') },
+];
+
+// ════════════════════════════════════════════════════════════
+//  SCHEDULE ALL FLOWS  (bidirectional)
+// ════════════════════════════════════════════════════════════
+function scheduleAll() {
+  const wrap = document.getElementById('arch-wrap');
+  const broker = document.getElementById('mqtt-broker');
+
+  // ── Layer 1 →: devices → bridges (telemetry) ──
+  const devBridges = [
+    {devs:['dev-plc','dev-meter'],         br:'p-modbus', color:'#ff6b35', genKey:'modbus_dev'},
+    {devs:['dev-hvac','dev-vav'],          br:'p-bacnet', color:'#f9c74f', genKey:'bacnet_dev'},
+    {devs:['dev-switch','dev-ups'],        br:'p-snmp',   color:'#4cc9f0', genKey:'snmp_dev'},
+    {devs:['dev-sensor','dev-motion'],     br:'p-zigbee', color:'#76c442', genKey:'zigbee_dev'},
+    {devs:['dev-bms','dev-cell','dev-inv'],br:'p-canbus', color:'#c77dff', genKey:'canbus_dev'},
+  ];
+  devBridges.forEach(({devs,br,color,genKey},gi) => {
+    devs.forEach((devId, di) => {
+      let t = 0;
+      const fn = () => {
+        if (!PAUSED) {
+          const dev=document.getElementById(devId), brel=document.getElementById(br);
+          if(dev&&brel){
+            const gen = PKT_GENERATORS[genKey];
+            const pktData = gen[t%gen.length]();
+            const mini = `${pktData.proto.split(' ')[0]}\n${pktData.fields[Object.keys(pktData.fields)[3]]||''}`.slice(0,30);
+            animPkt({x1:rightX(dev,wrap),y1:midY(dev,wrap),x2:leftX(brel,wrap),y2:midY(brel,wrap),color,miniLabel:mini,pktData,delay:di*180});
+            t++;
+          }
+        }
+        setTimeout(fn, Math.round((2400+gi*200+di*380)/SPEED));
+      };
+      setTimeout(fn, 600+gi*300+di*200);
+    });
+  });
+
+  // ── Layer 2 →: bridges → broker (PUBLISH telemetry) ──
+  const bridges = [
+    {id:'p-modbus',color:'#ff6b35',topic:'factory/modbus/plc-s7'},
+    {id:'p-bacnet',color:'#f9c74f',topic:'building/bacnet/hvac'},
+    {id:'p-snmp',  color:'#4cc9f0',topic:'network/snmp/core-switch'},
+    {id:'p-zigbee',color:'#76c442',topic:'sensors/zigbee/aqara-01'},
+    {id:'p-canbus',color:'#c77dff',topic:'bms/canbus/orion-bms2'},
+  ];
+  bridges.forEach(({id,color,topic},i) => {
+    let t=0;
+    const fn=()=>{
+      if(!PAUSED){
+        const br=document.getElementById(id); if(br){
+          const bx=midX(broker,wrap),by=midY(broker,wrap);
+          const pktData=PKT_GENERATORS.mqtt_pub[0](null,topic);
+          const mini=`PUBLISH\n${topic.split('/').slice(-1)[0]}`;
+          animPkt({x1:rightX(br,wrap),y1:midY(br,wrap),x2:bx-57,y2:by,color,miniLabel:mini,pktData});
+          t++;
+        }
+      }
+      setTimeout(fn,Math.round((2600+i*240)/SPEED));
+    };
+    setTimeout(fn,1000+i*350);
+  });
+
+  // ── Layer 3 →: broker → consumers (SUBSCRIBE deliver) ──
+  const consumers=[
+    {id:'c-influx',   color:'#ffd60a',topic:'factory/modbus/plc-s7'},
+    {id:'c-timescale',color:'#ffd60a',topic:'bms/canbus/orion-bms2'},
+    {id:'c-grafana',  color:'#56cfe1',topic:'sensors/zigbee/aqara-01'},
+    {id:'c-webapp',   color:'#56cfe1',topic:'building/bacnet/hvac'},
+    {id:'c-rules',    color:'#ff9f1c',topic:'network/snmp/core-switch'},
+  ];
+  consumers.forEach(({id,color,topic},i)=>{
+    let t=0;
+    const fn=()=>{
+      if(!PAUSED){
+        const el=document.getElementById(id); if(el){
+          const bx=midX(broker,wrap),by=midY(broker,wrap);
+          const pktData=PKT_GENERATORS.mqtt_pub[0](null,topic);
+          pktData.layer='MQTT Broker → Consumer';
+          pktData.summary=`SUBSCRIBE deliver to ${id.replace('c-','').toUpperCase()}`;
+          const mini=`DELIVER\n${topic.split('/')[0]}`;
+          animPkt({x1:bx+57,y1:by,x2:leftX(el,wrap),y2:midY(el,wrap),color,miniLabel:mini,pktData});
+          t++;
+        }
+      }
+      setTimeout(fn,Math.round((2800+i*270)/SPEED));
+    };
+    setTimeout(fn,1500+i*400);
+  });
+
+  // ── Layer 4 →: consumers → outputs ──
+  const consOuts=[
+    {cons:'c-influx',   out:'out-dashboard', dest:'InfluxDB Write'},
+    {cons:'c-influx',   out:'out-alert',     dest:'Alert Engine'},
+    {cons:'c-timescale',out:'out-sql',        dest:'TimescaleDB SQL'},
+    {cons:'c-grafana',  out:'out-map',        dest:'Grafana Panel'},
+    {cons:'c-webapp',   out:'out-scada',      dest:'SCADA webapp'},
+    {cons:'c-webapp',   out:'out-mobile',     dest:'Mobile Push'},
+    {cons:'c-rules',    out:'out-action',     dest:'Rules Engine'},
+    {cons:'c-rules',    out:'out-ml',         dest:'ML Anomaly'},
+  ];
+  const outColors={'c-influx':'#ffd60a','c-timescale':'#ffd60a','c-grafana':'#56cfe1','c-webapp':'#56cfe1','c-rules':'#ff9f1c'};
+  consOuts.forEach(({cons,out,dest},i)=>{
+    const color=outColors[cons]||'#fff';
+    const fn=()=>{
+      if(!PAUSED){
+        const cel=document.getElementById(cons),oel=document.getElementById(out);
+        if(cel&&oel){
+          const pktData=PKT_GENERATORS.consumer_out[0](dest,null);
+          const mini=dest.split(' ')[0]+'\n'+dest.split(' ').slice(1).join(' ');
+          animPkt({x1:rightX(cel,wrap),y1:midY(cel,wrap),x2:leftX(oel,wrap),y2:midY(oel,wrap),color,miniLabel:mini,pktData});
+        }
+      }
+      setTimeout(fn,Math.round((3200+i*320)/SPEED));
+    };
+    setTimeout(fn,2200+i*350);
+  });
+
+  // ════════════════════════════════════
+  // ← REVERSE FLOWS: commands/control
+  // ════════════════════════════════════
+  CMD_FLOWS.forEach(({src, dst, color, interval, make}, i) => {
+    const fn = () => {
+      if (!PAUSED) {
+        // Resolve source/dest to DOM IDs, handling special broker-pub token
+        const srcEl = src === 'broker-pub' ? broker : document.getElementById(src);
+        const dstEl = dst === 'broker-pub' ? broker : document.getElementById(dst);
+        if (!srcEl || !dstEl) { setTimeout(fn, Math.round(interval/SPEED)); return; }
+
+        const pktData = make();
+
+        // Calculate coordinates based on direction
+        let x1, y1, x2, y2;
+
+        // Special case: broker as source (broker → bridge)
+        if (src === 'broker-pub') {
+          x1 = midX(broker,wrap) - 57;
+          y1 = midY(broker,wrap);
+          x2 = rightX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        // Special case: broker as dest (consumer → broker)
+        else if (dst === 'broker-pub') {
+          x1 = leftX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = midX(broker,wrap) + 57;
+          y2 = midY(broker,wrap);
+        }
+        // Output → consumer (right to left)
+        else if (src.startsWith('out-') && dst.startsWith('c-')) {
+          x1 = leftX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = rightX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        // Consumer → bridge (right to left, via broker implied)
+        else if (src.startsWith('c-') && dst.startsWith('p-')) {
+          x1 = leftX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = rightX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        // Bridge → device (right to left)
+        else if (src.startsWith('p-') && dst.startsWith('dev-')) {
+          x1 = leftX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = rightX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        // Output → output cross-flow (keep horizontal, slight offset)
+        else if (src.startsWith('out-') && dst.startsWith('out-')) {
+          x1 = midX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = midX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        // SCADA → consumer
+        else if (src.startsWith('out-') && dst.startsWith('c-')) {
+          x1 = leftX(srcEl, wrap);
+          y1 = midY(srcEl, wrap);
+          x2 = rightX(dstEl, wrap);
+          y2 = midY(dstEl, wrap);
+        }
+        else {
+          x1 = midX(srcEl, wrap); y1 = midY(srcEl, wrap);
+          x2 = midX(dstEl, wrap); y2 = midY(dstEl, wrap);
+        }
+
+        const mini = `◄ CMD\n${pktData.topic.split('/').slice(-1)[0].slice(0,14)}`;
+        animPkt({x1, y1, x2, y2, color, miniLabel: mini, pktData});
+      }
+      setTimeout(fn, Math.round((interval + Math.random()*800) / SPEED));
+    };
+    // Stagger reverse flows so they don't all start together
+    setTimeout(fn, 3000 + i * 420);
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  setTimeout(() => { drawLines(); scheduleAll(); }, 450);
+});
+window.addEventListener('resize', () => drawLines());
+</script>
+</body>
+</html>
